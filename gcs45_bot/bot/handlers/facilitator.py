@@ -26,6 +26,16 @@ log = structlog.get_logger()
 _locks: dict[str, asyncio.Lock] = {}
 
 MAX_CONSECUTIVE_TURNS = 5  # Принудительный переход если Claude не переключает сам
+ADDRESS_FEEDBACK_PATTERNS = (
+    "вопрос не тому",
+    "не тому задал",
+    "задай вопрос мне",
+    "спроси меня",
+    "это баг",
+    "ты перепутал",
+    "ты не меня спрашиваешь",
+    "это я отвечаю",
+)
 
 
 def _get_lock(session_id: str) -> asyncio.Lock:
@@ -62,6 +72,68 @@ def _apply_next_speaker(session: SessionState, next_speaker: str) -> None:
     session.speaker_turn = next_speaker  # type: ignore[assignment]
     session.waiting_since = datetime.utcnow()
     session.timeout_reminders_sent = 0
+
+
+def _normalize_text(value: str | None) -> str:
+    return " ".join((value or "").strip().lower().replace("ё", "е").split())
+
+
+def _message_explicit_addressee(session: SessionState, message: str) -> str | None:
+    normalized = _normalize_text(message)
+    if not normalized:
+        return None
+
+    for label, name in (("A", session.name_a), ("B", session.name_b)):
+        if not name:
+            continue
+        lowered_name = _normalize_text(name)
+        if normalized.startswith(f"{lowered_name},") or normalized.startswith(f"{lowered_name}:"):
+            return label
+        if normalized.startswith(f"{lowered_name} ") or normalized.startswith(f"{lowered_name} —"):
+            return label
+
+    return None
+
+
+def _looks_like_address_feedback(message: str) -> bool:
+    normalized = _normalize_text(message)
+    return any(pattern in normalized for pattern in ADDRESS_FEEDBACK_PATTERNS)
+
+
+def _resolve_next_speaker_with_guardrail(
+    session: SessionState,
+    proposed_next_speaker: str,
+    ai_message: str,
+    last_user_message: str,
+    last_user_label: str | None,
+) -> str:
+    resolved_next_speaker = proposed_next_speaker if proposed_next_speaker in ("A", "B", "BOTH") else "BOTH"
+    reason = "no_override"
+    explicit_addressee = _message_explicit_addressee(session, ai_message)
+
+    if proposed_next_speaker not in ("A", "B", "BOTH"):
+        reason = "safe_fallback_both"
+    if _looks_like_address_feedback(last_user_message):
+        if last_user_label in ("A", "B"):
+            resolved_next_speaker = last_user_label
+            reason = "feedback_override"
+        else:
+            resolved_next_speaker = "BOTH"
+            reason = "safe_fallback_both"
+    elif explicit_addressee and explicit_addressee != resolved_next_speaker:
+        resolved_next_speaker = explicit_addressee
+        reason = "text_address_override"
+
+    log.info(
+        "next_speaker_guardrail",
+        session_id=session.session_id,
+        reason=reason,
+        proposed_next_speaker=proposed_next_speaker,
+        resolved_next_speaker=resolved_next_speaker,
+        explicit_addressee=explicit_addressee,
+        last_user_label=last_user_label,
+    )
+    return resolved_next_speaker
 
 
 def _speaker_signature(session: SessionState) -> str:
@@ -339,6 +411,13 @@ async def _collect_for_both(
         _release_lock(session.session_id)
         return
 
+    next_speaker = _resolve_next_speaker_with_guardrail(
+        session,
+        next_speaker,
+        reply,
+        combined,
+        None,
+    )
     _apply_next_speaker(session, next_speaker)
     signature, keyboard = _reply_extras(session)
     full_reply = reply + signature
@@ -417,6 +496,13 @@ async def _process_turn(
         _release_lock(session.session_id)
         return
 
+    next_speaker = _resolve_next_speaker_with_guardrail(
+        session,
+        next_speaker,
+        reply,
+        text,
+        sender_label,
+    )
     _apply_next_speaker(session, next_speaker)
     signature, keyboard = _reply_extras(session)
     full_reply = reply + signature
