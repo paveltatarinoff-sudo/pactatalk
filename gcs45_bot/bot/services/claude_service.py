@@ -502,7 +502,7 @@ class ClaudeService:
         user_message: str,
         sender_label: str,
         repo,
-    ) -> tuple[str, bool, str]:
+    ) -> tuple[str, bool, str, dict[str, str | bool]]:
         """
         Отправить сообщение фасилитатору и получить структурированный ответ.
         Возвращает (текст_ответа, risk_flag, next_speaker).
@@ -510,6 +510,8 @@ class ClaudeService:
         (caller сохраняет сессию в repo после вызова).
         """
         formatted = f"[{sender_label}]: {user_message}"
+        dialogue_state_before = session.dialogue_state
+        waiting_for_before = session.waiting_for
         await self._add_message(session.session_id, "user", formatted, repo)
 
         messages = await self._get_history(session.session_id, repo)
@@ -607,8 +609,17 @@ class ClaudeService:
 
         # В историю — только текст, без JSON-обёртки
         await self._add_message(session.session_id, "assistant", message, repo)
+        response_meta: dict[str, str | bool] = {
+            "addressed_to": addressed_to,
+            "next_speaker": next_speaker,
+            "next_state": next_state,
+            "dialogue_state_before": dialogue_state_before,
+            "dialogue_state_after": session.dialogue_state,
+            "waiting_for_before": waiting_for_before,
+            "risk_flag": risk_flag,
+        }
 
-        return message, risk_flag, next_speaker
+        return message, risk_flag, next_speaker, response_meta
 
     async def transcribe_voice(self, audio_bytes: bytes) -> str:
         """Транскрибировать голосовое сообщение через Whisper."""

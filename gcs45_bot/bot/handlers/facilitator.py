@@ -330,6 +330,16 @@ async def _collect_for_both(
     """Собирает ответы обоих партнёров, затем отправляет Claude объединённый запрос."""
     partner_id = session.user_b_id if sender_label == "A" else session.user_a_id
     other_name = session.name_b if sender_label == "A" else session.name_a
+    await repo.append_event(
+        session_id=session.session_id,
+        role="user",
+        speaker_label=sender_label,
+        content=text,
+        dialogue_state_before=session.dialogue_state,
+        dialogue_state_after=session.dialogue_state,
+        waiting_for_before=session.waiting_for,
+        waiting_for_after=session.waiting_for,
+    )
 
     # Проверяем не ответил ли уже этот партнёр
     already = session.pending_a_message if sender_label == "A" else session.pending_b_message
@@ -378,7 +388,7 @@ async def _collect_for_both(
         await bot.send_chat_action(partner_id, "typing")
 
     try:
-        reply, risk_detected, next_speaker = await _claude.get_facilitator_response(
+        reply, risk_detected, next_speaker, response_meta = await _claude.get_facilitator_response(
             session, combined, f"{session.name_a} и {session.name_b}", repo
         )
     except OpenAIServiceError as exc:
@@ -418,9 +428,24 @@ async def _collect_for_both(
         combined,
         None,
     )
+    dialogue_state_before = response_meta.get("dialogue_state_before")
+    waiting_for_before = response_meta.get("waiting_for_before")
     _apply_next_speaker(session, next_speaker)
     signature, keyboard = _reply_extras(session)
     full_reply = reply + signature
+    await repo.append_event(
+        session_id=session.session_id,
+        role="assistant",
+        speaker_label="BOT",
+        content=full_reply,
+        dialogue_state_before=dialogue_state_before if isinstance(dialogue_state_before, str) else None,
+        dialogue_state_after=session.dialogue_state,
+        waiting_for_before=waiting_for_before if isinstance(waiting_for_before, str) else None,
+        waiting_for_after=session.waiting_for,
+        next_speaker=next_speaker,
+        addressed_to=response_meta.get("addressed_to") if isinstance(response_meta.get("addressed_to"), str) else None,
+        risk_flag=bool(response_meta.get("risk_flag")),
+    )
     await repo.save(session)
 
     for uid in (session.user_a_id, session.user_b_id):
@@ -445,6 +470,16 @@ async def _process_turn(
 ) -> None:
     sender_name = session.name_a if sender_label == "A" else session.name_b
     partner_id = session.user_b_id if sender_label == "A" else session.user_a_id
+    await repo.append_event(
+        session_id=session.session_id,
+        role="user",
+        speaker_label=sender_label,
+        content=text,
+        dialogue_state_before=session.dialogue_state,
+        dialogue_state_after=session.dialogue_state,
+        waiting_for_before=session.waiting_for,
+        waiting_for_after=session.waiting_for,
+    )
 
     # Передать сообщение партнёру
     if partner_id and partner_id != message.from_user.id:
@@ -463,7 +498,7 @@ async def _process_turn(
         await bot.send_chat_action(partner_id, "typing")
 
     try:
-        reply, risk_detected, next_speaker = await _claude.get_facilitator_response(
+        reply, risk_detected, next_speaker, response_meta = await _claude.get_facilitator_response(
             session, text, sender_name, repo
         )
     except OpenAIServiceError as exc:
@@ -503,9 +538,24 @@ async def _process_turn(
         text,
         sender_label,
     )
+    dialogue_state_before = response_meta.get("dialogue_state_before")
+    waiting_for_before = response_meta.get("waiting_for_before")
     _apply_next_speaker(session, next_speaker)
     signature, keyboard = _reply_extras(session)
     full_reply = reply + signature
+    await repo.append_event(
+        session_id=session.session_id,
+        role="assistant",
+        speaker_label="BOT",
+        content=full_reply,
+        dialogue_state_before=dialogue_state_before if isinstance(dialogue_state_before, str) else None,
+        dialogue_state_after=session.dialogue_state,
+        waiting_for_before=waiting_for_before if isinstance(waiting_for_before, str) else None,
+        waiting_for_after=session.waiting_for,
+        next_speaker=next_speaker,
+        addressed_to=response_meta.get("addressed_to") if isinstance(response_meta.get("addressed_to"), str) else None,
+        risk_flag=bool(response_meta.get("risk_flag")),
+    )
     await repo.save(session)
 
     for uid in (message.from_user.id, partner_id):

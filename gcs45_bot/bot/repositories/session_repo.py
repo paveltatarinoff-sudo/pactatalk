@@ -9,6 +9,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import async_sessionmaker
 import structlog
 
+from bot.models.session_event import SessionEvent
 from bot.models.session import SessionState
 from bot.models.session_record import SessionSnapshot
 
@@ -122,6 +123,42 @@ class SessionRepository:
 
     async def delete_history(self, session_id: str) -> None:
         await self._redis.delete(self._history_key(session_id))
+
+    async def append_event(
+        self,
+        *,
+        session_id: str,
+        role: str,
+        speaker_label: Optional[str],
+        content: str,
+        dialogue_state_before: Optional[str] = None,
+        dialogue_state_after: Optional[str] = None,
+        waiting_for_before: Optional[str] = None,
+        waiting_for_after: Optional[str] = None,
+        next_speaker: Optional[str] = None,
+        addressed_to: Optional[str] = None,
+        risk_flag: Optional[bool] = None,
+    ) -> None:
+        if self._session_factory is None:
+            return
+
+        async with self._session_factory() as db:
+            db.add(
+                SessionEvent(
+                    session_id=session_id,
+                    role=role,
+                    speaker_label=speaker_label,
+                    content=content,
+                    dialogue_state_before=dialogue_state_before,
+                    dialogue_state_after=dialogue_state_after,
+                    waiting_for_before=waiting_for_before,
+                    waiting_for_after=waiting_for_after,
+                    next_speaker=next_speaker,
+                    addressed_to=addressed_to,
+                    risk_flag=risk_flag,
+                )
+            )
+            await db.commit()
 
     async def list_active_sessions(self) -> list[SessionState]:
         session_ids = await self._redis.smembers(ACTIVE_SESSIONS_KEY)

@@ -14,6 +14,7 @@ from bot.services.claude_service import ClaudeService
 class InMemoryRepo:
     def __init__(self) -> None:
         self._history: dict[str, list[dict[str, str]]] = {}
+        self._events: list[dict[str, Any]] = []
 
     async def get_history(self, session_id: str) -> list[dict[str, str]]:
         return list(self._history.get(session_id, []))
@@ -23,6 +24,9 @@ class InMemoryRepo:
 
     async def delete_history(self, session_id: str) -> None:
         self._history.pop(session_id, None)
+
+    async def append_event(self, **kwargs: Any) -> None:
+        self._events.append(kwargs)
 
 
 def _default_scenarios_path() -> Path:
@@ -58,7 +62,7 @@ async def _run_scenario(service: ClaudeService, scenario: dict[str, Any]) -> dic
     outputs: list[dict[str, Any]] = []
 
     for turn in turns:
-        message, risk_flag, next_speaker = await service.get_facilitator_response(
+        message, risk_flag, next_speaker, response_meta = await service.get_facilitator_response(
             session=session,
             user_message=turn["message"],
             sender_label=turn["sender_label"],
@@ -74,6 +78,7 @@ async def _run_scenario(service: ClaudeService, scenario: dict[str, Any]) -> dic
                     "message": message,
                     "risk_flag": risk_flag,
                     "next_speaker": next_speaker,
+                    "addressed_to": response_meta.get("addressed_to"),
                     "dialogue_state": session.dialogue_state,
                     "last_turn_summary": session.last_turn_summary,
                 },
