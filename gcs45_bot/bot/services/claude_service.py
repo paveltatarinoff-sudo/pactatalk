@@ -94,14 +94,22 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
    ДА: «что именно?», «в какой момент?», «когда это особенно чувствуется?»
    НЕТ: «что это для тебя значит?», «как найти баланс?», «как вы видите это?»
 
-4. НЕ ОБОБЩАЙ, НЕ ТОРОПИСЬ К РЕШЕНИЯМ.
-   Не формулируй «общую тему», не спрашивай «какие шаги?», пока
-   не услышал конкретную ситуацию от каждого и оба не чувствуют себя
-   услышанными. Обобщение до понимания убивает диалог.
+4. НЕ ТОРОПИСЬ К РЕШЕНИЯМ. ФУНКЦИЯ «ШАГНУТЬ» ЗАПРЕЩЕНА, ПОКА:
+   — каждый партнёр не рассказал конкретную ситуацию (не общие слова)
+   — оба не чувствуют себя услышанными (ты отразил боль каждого)
+   — ядро конфликта названо живыми словами (правило 6)
+   — в диалоге не накопилось хотя бы 8 пользовательских ходов
+   Если хочется предложить шаг — СТОП. Спроси себя: «Я назвал боль
+   каждого? Они оба кивнули?» Нет → вернись к ВЫРАЗИТЬ или ПРОЯСНИТЬ.
+   АНТИПАТТЕРН: партнёр отверг предложение («мы пробовали», «это не
+   поможет», «не то») → НЕ предлагай другое действие. Вернись к боли:
+   «Что стоит за тем, что это не подходит?»
 
 5. ЭМОЦИЯ > ФАКТ, НАСТОЯЩЕЕ > БУДУЩЕЕ.
    Реагируй на чувство или потребность, не на факт.
    Спрашивай «что сейчас?», «что чувствуешь?» — не «как двигаться дальше?».
+   Если партнёр показал боль — ПОБУДЬ С НЕЙ. Не лечи, не решай, не
+   переключай. Просто назови и спроси глубже. Боль ≠ проблема для решения.
 
 6. НАЗОВИ КОНФЛИКТ ЖИВЫМИ СЛОВАМИ.
    Если позиции противоречат — не сглаживай и не канцеляри. Скажи живо:
@@ -235,12 +243,24 @@ STATE_GUIDELINES: dict[str, str] = {
         "СТОП: оба уже высказали противоположные потребности? "
         "→ Не углубляй одного. Назови столкновение (ПРОЯСНИТЬ), next_state=CLARIFY.\n"
         "Иначе: помоги назвать чувство или потребность — не анализируй.\n"
-        "Когда потребность названа → CLARIFY (нужно понимание) или OPTIONS (понимание есть)."
+        "ПОБУДЬ С БОЛЬЮ ДОЛЬШЕ. Если партнёр показал уязвимость — не спеши дальше и не "
+        "пытайся быть полезным действием.\n"
+        "Назови то, что услышал. Спроси: «что за этим стоит?», «когда это особенно остро?».\n"
+        "НЕ предлагай шаги, решения, действия, ритуалы, договорённости. Это не твоя задача сейчас.\n"
+        "Когда потребность названа → CLARIFY (нужно понимание). OPTIONS — только если "
+        "сервер разрешит (оба услышаны + конфликт назван)."
     ),
     "OPTIONS": (
         "Функция: ШАГНУТЬ. Одно действие на этот ход:\n"
+        "ПРОВЕРКА ПЕРЕД ШАГОМ: ты назвал боль каждого? Оба кивнули?\n"
+        "Если в диалоге меньше 8 пользовательских ходов — OPTIONS запрещён, вернись к DEEPEN/CLARIFY.\n"
+        "Конфликт назван живыми словами? Если нет — вернись к DEEPEN.\n"
         "Предложи 2 конкретных варианта маленького шага на неделю "
         "(предложи addressed_to='BOTH').\n"
+        "ЕСЛИ ПАРТНЁР ОТВЕРГАЕТ ШАГИ — НЕ предлагай новые. Скажи:\n"
+        "«Значит, мы ещё не дошли до сути. Что за этим стоит?» → DEEPEN.\n"
+        "Если уже был отказ от шагов или похожее предложение недавно провалилось — не повторяй action cycle, "
+        "сразу возвращайся в DEEPEN.\n"
         "Когда выбрали → AGREE."
     ),
     "AGREE": (
@@ -466,6 +486,69 @@ class ClaudeService:
 
         return (a_space and b_closeness) or (b_space and a_closeness)
 
+    @classmethod
+    def _count_user_turns(cls, messages: list[dict]) -> int:
+        """Count total user turns in dialogue history."""
+        count = 0
+        for item in messages:
+            if item.get("role") == "user":
+                parsed = cls._extract_user_turn(item.get("content", ""))
+                if parsed is not None:
+                    count += 1
+        return count
+
+    _ACTION_REJECTION_MARKERS: tuple[str, ...] = (
+        "мы пробовали", "это не поможет", "не то", "не подходит",
+        "уже пытались", "не работает", "бесполезно", "не хочу",
+        "это не про то", "мимо", "не в этом дело", "ерунда",
+        "банально", "шаблонно", "некомпетент",
+    )
+    _ACTION_PROPOSAL_MARKERS: tuple[str, ...] = (
+        "маленький шаг", "на этой неделе", "готовы попробовать", "договор",
+        "договоренность", "попробуйте", "предлагаю", "варианта",
+        "что одно маленькое", "что вы готовы", "ритуал", "шагом",
+    )
+
+    @classmethod
+    def _detect_action_rejection(cls, messages: list[dict], current_state: str) -> bool:
+        """Detect if user rejected an action proposal (while in OPTIONS/AGREE)."""
+        if current_state not in ("OPTIONS", "AGREE"):
+            return False
+        turns = cls._recent_user_turns(messages, limit=1)
+        if not turns:
+            return False
+        _, text = turns[0]
+        return cls._contains_any(text, cls._ACTION_REJECTION_MARKERS)
+
+    @classmethod
+    def _assistant_looks_like_action_proposal(cls, text: str) -> bool:
+        return cls._contains_any(text, cls._ACTION_PROPOSAL_MARKERS)
+
+    @classmethod
+    def _recent_action_loop_detected(cls, messages: list[dict]) -> bool:
+        proposal_count = 0
+        for item in reversed(messages):
+            role = item.get("role")
+            content = item.get("content", "")
+            if role == "assistant" and cls._assistant_looks_like_action_proposal(content):
+                proposal_count += 1
+                if proposal_count >= 2:
+                    return True
+            elif role == "user":
+                parsed = cls._extract_user_turn(content)
+                if parsed is None:
+                    continue
+                _, text = parsed
+                if not cls._contains_any(text, cls._ACTION_REJECTION_MARKERS):
+                    break
+        return False
+
+    MIN_USER_TURNS_FOR_OPTIONS = 8
+
+    @classmethod
+    def _fallback_state_from_messages(cls, messages: list[dict]) -> str:
+        return "CLARIFY" if cls._should_force_clarify(messages) else "DEEPEN"
+
     def _resolve_effective_state(self, session: SessionState, messages: list[dict]) -> str:
         if self._should_force_clarify(messages):
             log.info(
@@ -475,6 +558,40 @@ class ClaudeService:
                 effective_state="CLARIFY",
             )
             return "CLARIFY"
+
+        # Block premature OPTIONS/AGREE if not enough user turns
+        if session.dialogue_state in ("OPTIONS", "AGREE"):
+            user_turn_count = self._count_user_turns(messages)
+            if user_turn_count < self.MIN_USER_TURNS_FOR_OPTIONS:
+                fallback_state = self._fallback_state_from_messages(messages)
+                log.info(
+                    "blocked_premature_options",
+                    session_id=session.session_id,
+                    original_state=session.dialogue_state,
+                    user_turns=user_turn_count,
+                    min_required=self.MIN_USER_TURNS_FOR_OPTIONS,
+                    effective_state=fallback_state,
+                )
+                return fallback_state
+
+        # Detect action rejection → force back to DEEPEN
+        if self._detect_action_rejection(messages, session.dialogue_state):
+            log.info(
+                "action_rejection_detected",
+                session_id=session.session_id,
+                original_state=session.dialogue_state,
+                effective_state="DEEPEN",
+            )
+            return "DEEPEN"
+
+        if session.dialogue_state in ("OPTIONS", "AGREE") and self._recent_action_loop_detected(messages):
+            log.info(
+                "anti_loop_guard_options",
+                session_id=session.session_id,
+                original_state=session.dialogue_state,
+                effective_state="DEEPEN",
+            )
+            return "DEEPEN"
 
         log.info(
             "state_kept_original",
@@ -595,14 +712,49 @@ class ClaudeService:
 
         # Обновляем state machine и async context (caller сохранит сессию)
         valid_states = {"SETUP", "CLARIFY", "DEESCALATE", "DEEPEN", "OPTIONS", "AGREE", "CHECK_IN"}
+
+        # Post-response guard: block CLARIFY→DEEPEN when forced CLARIFY
         if effective_state == "CLARIFY" and next_state == "DEEPEN":
             log.info(
-                "forced_clarify_two_sided_conflict",
+                "post_guard_forced_clarify",
                 session_id=session.session_id,
                 original_state=next_state,
                 effective_state="CLARIFY",
             )
             next_state = "CLARIFY"
+
+        # Post-response guard: block premature jump to OPTIONS/AGREE
+        if next_state in ("OPTIONS", "AGREE"):
+            user_turn_count = self._count_user_turns(messages)
+            if user_turn_count < self.MIN_USER_TURNS_FOR_OPTIONS:
+                fallback_state = self._fallback_state_from_messages(messages)
+                log.info(
+                    "post_guard_blocked_premature_options",
+                    session_id=session.session_id,
+                    model_wanted=next_state,
+                    user_turns=user_turn_count,
+                    forced_state=fallback_state,
+                )
+                next_state = fallback_state
+
+        if next_state in ("OPTIONS", "AGREE") and self._detect_action_rejection(messages, dialogue_state_before):
+            log.info(
+                "action_rejection_detected",
+                session_id=session.session_id,
+                original_state=dialogue_state_before,
+                effective_state="DEEPEN",
+            )
+            next_state = "DEEPEN"
+
+        if next_state in ("OPTIONS", "AGREE") and self._recent_action_loop_detected(messages):
+            log.info(
+                "anti_loop_guard_options",
+                session_id=session.session_id,
+                original_state=dialogue_state_before,
+                forced_state="DEEPEN",
+            )
+            next_state = "DEEPEN"
+
         if next_state in valid_states:
             session.dialogue_state = next_state
         session.last_turn_summary = message[:150].strip()
