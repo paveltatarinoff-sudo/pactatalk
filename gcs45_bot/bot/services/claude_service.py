@@ -353,6 +353,19 @@ STATE_GUIDELINES: dict[str, str] = {
     ),
 }
 
+STATE_GUIDELINES_RESUME = (
+    "Функция: ВЫРАЗИТЬ. Это ПРОДОЛЖЕНИЕ предыдущей сессии.\n"
+    "НЕ начинай с «Что тебя сюда привело?» — это уже было.\n"
+    "Используй контекст из resume выше.\n"
+    "Первый ход:\n"
+    "  1. Коротко напомни, о чём шёл разговор (1-2 предложения, своими словами).\n"
+    "  2. Спроси: «Хотите продолжить эту тему или начать новую?»\n"
+    "  3. addressed_to='BOTH', next_speaker='BOTH'.\n"
+    "Если пара хочет продолжить → переходи в состояние из resume (DEEPEN/CLARIFY/OPTIONS).\n"
+    "Если пара хочет новую тему → обычный SETUP.\n"
+    "НЕ пересказывай resume дословно. Перефразируй живыми словами."
+)
+
 MAX_CONTEXT_MESSAGES = 30
 
 MODEL = "gpt-4o"
@@ -605,6 +618,22 @@ class ClaudeService:
                         f"Подумай, не пора ли передать слово {other} ({other_label}).\n"
                     )
 
+        # Resume context from previous session
+        resume_block = ""
+        if session.resume_context and effective_state == "SETUP":
+            resume_block = (
+                f"\n📋 КОНТЕКСТ ПРЕДЫДУЩЕЙ СЕССИИ (resume):\n"
+                f"{session.resume_context}\n"
+                f"--- конец resume ---\n"
+                f"Это продолжение. НЕ начинай с нуля. Напомни паре, о чём шёл разговор,\n"
+                f"и спроси: «Хотите продолжить эту тему или начать новую?»\n"
+            )
+
+        state_guidelines = STATE_GUIDELINES.get(effective_state, STATE_GUIDELINES["CLARIFY"])
+        # In SETUP with resume, use the resume variant of guidelines
+        if session.resume_context and effective_state == "SETUP":
+            state_guidelines = STATE_GUIDELINES_RESUME
+
         return (
             f"Текущее состояние диалога:\n"
             f"- Партнёр A = {name_a}  ← addressed_to=\"A\", next_speaker=\"A\"\n"
@@ -618,7 +647,8 @@ class ClaudeService:
             f"- Последняя тема: {session.topic_current or 'начало диалога'}\n"
             f"- Краткое резюме последнего хода: {session.last_turn_summary or 'начало диалога'}\n"
             f"- risk_flag: {session.risk_flag}\n"
-            f"\n"
+            + resume_block
+            + "\n"
             + last_answer_hint
             + consecutive_info
             + repetition_warning
@@ -627,7 +657,7 @@ class ClaudeService:
             + handoff_ctx
             + "\n"
             f"Руководство для состояния {effective_state}:\n"
-            f"{STATE_GUIDELINES.get(effective_state, STATE_GUIDELINES['CLARIFY'])}"
+            f"{state_guidelines}"
         )
 
     @classmethod
@@ -1262,6 +1292,53 @@ class ClaudeService:
             _transcribe,
         )
         return transcript.text.strip()
+
+    async def generate_resume_context(self, session: SessionState, repo) -> str:
+        """Generate a structured resume brief for the bot to use in the next session.
+
+        This is NOT user-facing — it's a compact context for the facilitator prompt.
+        """
+        history = await self._get_history(session.session_id, repo)
+        if not history:
+            return ""
+
+        name_a = session.name_a or "A"
+        name_b = session.name_b or "B"
+
+        prompt = (
+            f"Составь КРАТКИЙ КОНТЕКСТ для следующей сессии этой пары (до 150 слов).\n"
+            f"Партнёр A = {name_a}, Партнёр B = {name_b}.\n"
+            f"Формат (строго):\n"
+            f"Тема: [главная тема разговора — 1 предложение]\n"
+            f"Позиция {name_a}: [что ему/ей важно — 1 предложение]\n"
+            f"Позиция {name_b}: [что ему/ей важно — 1 предложение]\n"
+            f"Где остановились: [на каком этапе прервался разговор — 1 предложение]\n"
+            f"Что осталось недосказанным: [что не удалось обсудить — 1 предложение]\n"
+            f"Состояние: {session.dialogue_state}\n\n"
+            f"Пиши от третьего лица. Без оценок. Только факты из диалога."
+        )
+
+        try:
+            response = await self._with_retry(
+                "generate_resume_context",
+                lambda: self._client.chat.completions.create(
+                    model=MODEL,
+                    max_tokens=300,
+                    timeout=settings.openai_timeout_seconds,
+                    messages=[
+                        {"role": "system", "content": "Ты помощник, который составляет краткие контексты диалогов для фасилитатора."},
+                        *history[-20:],  # Last 20 messages max
+                        {"role": "user", "content": prompt},
+                    ],
+                ),
+                session_id=session.session_id,
+            )
+            if not response.choices:
+                return ""
+            return (response.choices[0].message.content or "").strip()
+        except Exception:
+            log.exception("resume_context_generation_failed", session_id=session.session_id)
+            return ""
 
     async def generate_summary(self, session: SessionState, repo) -> str:
         """Генерировать итоговое резюме диалога (свободный текст, без схемы)."""

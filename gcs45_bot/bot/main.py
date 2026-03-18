@@ -15,6 +15,7 @@ from bot.repositories.session_repo import SessionRepository
 from bot.services.session_service import SessionService
 from bot.models.session_record import SessionSnapshot  # noqa: F401
 from bot.models.session_event import SessionEvent  # noqa: F401
+from bot.models.pair_resume import PairResume  # noqa: F401
 
 logger = structlog.get_logger()
 

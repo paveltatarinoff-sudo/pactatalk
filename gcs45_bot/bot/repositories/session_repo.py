@@ -12,6 +12,7 @@ import structlog
 from bot.models.session_event import SessionEvent
 from bot.models.session import SessionState
 from bot.models.session_record import SessionSnapshot
+from bot.models.pair_resume import PairResume, make_pair_key
 
 SESSION_TTL = 60 * 60 * 24 * 7  # 7 дней
 INVITE_TTL = 60 * 60 * 24       # 24 часа (инвайт-коды — короткоживущие)
@@ -218,4 +219,64 @@ class SessionRepository:
 
         async with self._session_factory() as db:
             await db.execute(delete(SessionSnapshot).where(SessionSnapshot.session_id == session_id))
+            await db.commit()
+
+    # ── Pair resume (for session continuity) ─────────────────────────────────
+
+    async def save_pair_resume(
+        self,
+        session: SessionState,
+        resume_context: str,
+    ) -> None:
+        """Save or update the resume context for a pair."""
+        if self._session_factory is None:
+            return
+        if not session.user_a_id or not session.user_b_id:
+            return
+
+        pair_key = make_pair_key(session.user_a_id, session.user_b_id)
+        async with self._session_factory() as db:
+            existing = await db.get(PairResume, pair_key)
+            if existing is None:
+                db.add(PairResume(
+                    pair_key=pair_key,
+                    session_id=session.session_id,
+                    name_a=session.name_a or "",
+                    name_b=session.name_b or "",
+                    resume_context=resume_context,
+                    dialogue_state=session.dialogue_state,
+                ))
+            else:
+                existing.session_id = session.session_id
+                existing.name_a = session.name_a or ""
+                existing.name_b = session.name_b or ""
+                existing.resume_context = resume_context
+                existing.dialogue_state = session.dialogue_state
+                existing.updated_at = datetime.utcnow()
+            await db.commit()
+
+    async def get_pair_resume(self, user_a_id: int, user_b_id: int) -> Optional[str]:
+        """Load the resume context for a pair. Returns None if not found."""
+        if self._session_factory is None:
+            return None
+        if not user_a_id or not user_b_id:
+            return None
+
+        pair_key = make_pair_key(user_a_id, user_b_id)
+        async with self._session_factory() as db:
+            resume = await db.get(PairResume, pair_key)
+            if resume is None:
+                return None
+            return resume.resume_context
+
+    async def delete_pair_resume(self, user_a_id: int, user_b_id: int) -> None:
+        """Delete the resume context for a pair."""
+        if self._session_factory is None:
+            return
+        if not user_a_id or not user_b_id:
+            return
+
+        pair_key = make_pair_key(user_a_id, user_b_id)
+        async with self._session_factory() as db:
+            await db.execute(delete(PairResume).where(PairResume.pair_key == pair_key))
             await db.commit()

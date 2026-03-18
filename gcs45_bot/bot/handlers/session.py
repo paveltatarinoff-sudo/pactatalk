@@ -240,6 +240,17 @@ async def cb_join_confirm(
     except Exception:
         session.name_b = "Партнёр B"
 
+    repo = SessionRepository(redis, session_factory)
+
+    # Load resume from previous session (P3.1)
+    try:
+        resume_ctx = await repo.get_pair_resume(session.user_a_id, session.user_b_id)
+        if resume_ctx:
+            session.resume_context = resume_ctx
+            log.info("pair_resume_loaded", session_id=session.session_id)
+    except Exception:
+        log.exception("pair_resume_load_failed", session_id=session.session_id)
+
     session = await svc.start_session(session)
     # Устанавливаем FSM-состояние для B (текущий пользователь)
     await state.set_state(SessionFlow.opening)
@@ -254,18 +265,28 @@ async def cb_join_confirm(
     except Exception:
         pass  # некритично — facilitator работает без FSM-фильтра
 
-    common_intro = (
-        f"Давайте начнём. Я здесь, чтобы помочь вам услышать друг друга.\n\n"
-        f"Как это работает:\n"
-        f"• Пишешь сообщение или голосовое 🎤 — фасилитатор отвечает вам обоим\n"
-        f"• Говорит один, второй слушает — я слежу за очерёдностью\n"
-        f"• Завершить сессию можно в любой момент кнопкой ниже\n\n"
-        f"<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
-        f"Напишите каждый своё: <b>что ты хочешь получить от этого разговора?</b>\n"
-        f"Отвечайте независимо — я жду ответа от вас обоих."
-    )
-
-    repo = SessionRepository(redis, session_factory)
+    if session.resume_context:
+        common_intro = (
+            f"С возвращением! Я помню наш прошлый разговор.\n\n"
+            f"Как это работает:\n"
+            f"• Пишешь сообщение или голосовое 🎤 — фасилитатор отвечает вам обоим\n"
+            f"• Говорит один, второй слушает — я слежу за очерёдностью\n"
+            f"• Завершить сессию можно в любой момент кнопкой ниже\n\n"
+            f"<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+            f"Напишите каждый: <b>хотите продолжить прошлую тему или начать новую?</b>\n"
+            f"Отвечайте независимо — я жду ответа от вас обоих."
+        )
+    else:
+        common_intro = (
+            f"Давайте начнём. Я здесь, чтобы помочь вам услышать друг друга.\n\n"
+            f"Как это работает:\n"
+            f"• Пишешь сообщение или голосовое 🎤 — фасилитатор отвечает вам обоим\n"
+            f"• Говорит один, второй слушает — я слежу за очерёдностью\n"
+            f"• Завершить сессию можно в любой момент кнопкой ниже\n\n"
+            f"<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+            f"Напишите каждый своё: <b>что ты хочешь получить от этого разговора?</b>\n"
+            f"Отвечайте независимо — я жду ответа от вас обоих."
+        )
     m_a = await bot.send_message(session.user_a_id, common_intro, reply_markup=end_session_button())
     m_b = await bot.send_message(session.user_b_id, common_intro, reply_markup=end_session_button())
     session.first_msg_id_a = m_a.message_id
@@ -377,6 +398,15 @@ async def cb_end_session(
         await redis.set(f"summary:{session.user_b_id}", summary_text, ex=summary_ttl)
     except Exception:
         pass
+
+    # Generate and save resume context for next session (P3.1)
+    try:
+        resume_ctx = await _claude.generate_resume_context(session, repo)
+        if resume_ctx:
+            await repo.save_pair_resume(session, resume_ctx)
+            log.info("pair_resume_saved", session_id=session.session_id)
+    except Exception:
+        log.exception("pair_resume_save_failed", session_id=session.session_id)
 
     # Сохраняем first_msg_id для последующего удаления сообщений
     _ttl = 60 * 60 * 24
