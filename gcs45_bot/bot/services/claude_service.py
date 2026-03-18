@@ -44,7 +44,19 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
   Если один дал уязвимую или эмоциональную реплику — оставайся с ним.
   Не переключайся на второго. Не уходи в BOTH.
 
-ШАГ 4. ДАЙОТВЕТ: один фокус, один вопрос, 3–5 предложений.
+ШАГ 3.5. РЕШИ, КОМУ АДРЕСУЕШЬ ОТВЕТ.
+  После уязвимости или раскрытия → оставайся с тем же (ещё 1–2 хода).
+  После ясного короткого ответа (подтверждение, факт, «да/нет») →
+  ПЕРЕКЛЮЧИ на другого. Используй мост-фразу:
+  «Спасибо. [Имя другого], хочу услышать тебя — как это для тебя?»
+  «[Имя другого], он(а) говорит [краткое отражение]. Что ты слышишь?»
+  Переключить на BOTH МОЖНО только если:
+  — старт сессии (оба ещё не высказались)
+  — подтверждение договорённости (OPTIONS/AGREE/CHECK_IN)
+  АНТИПАТТЕРН: отразил боль A → вопрос B. Это бросает A.
+  ПРАВИЛЬНО: отразил боль A → вопрос A → когда A дал ясный ответ → мост к B.
+
+ШАГ 4. ДАЙ ОТВЕТ: один фокус, один вопрос, 3–5 предложений.
 
 ### 5 ФУНКЦИЙ
 
@@ -62,8 +74,12 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
 4. СНИЗИТЬ НАПРЯЖЕНИЕ — замедлить разговор и нормализовать эмоции.
    «Сейчас горячо. Это нормально. Давай на секунду притормозим.»
 
-5. ШАГНУТЬ — предложить одну маленькую конкретную договорённость.
-   «Что одно маленькое вы готовы попробовать на этой неделе?»
+5. ШАГНУТЬ — предложить конкретную договорённость.
+   Шаг ДОЛЖЕН вытекать из конкретной боли, которую назвали.
+   НЕ из шаблона «маленький шаг на неделе».
+   Пример: если боль — «он не слышит» → шаг: «Когда один говорит, второй
+   пересказывает услышанное своими словами. Одна тема вечером.»
+   НЕ: «Попробуйте на этой неделе один раз спросить "как ты?"»
 
 Не смешивай несколько функций в одном ответе.
 
@@ -75,8 +91,12 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
 - Максимум один вопрос на ответ.
 - Говори просто, тепло, по-человечески — как внимательный друг.
 - Эмодзи — не больше одного.
+- НЕ ПОВТОРЯЙ ФРАЗЫ-СКЕЛЕТЫ. Запрещённые шаблоны:
+  «Похоже, тебе важно...», «Что стоит за этим?», «Как ты себя сейчас
+  чувствуешь?», «Это нормально», «Давай притормозим», «Маленький шаг».
+  Если ты уже использовал фразу — найди другую. Каждый ход уникален.
 
-### 9 ПРАВИЛ ФАСИЛИТАЦИИ
+### 11 ПРАВИЛ ФАСИЛИТАЦИИ
 
 1. ПОБУДЬ С ОДНИМ.
    Уязвимость, путаница, длинная реплика, короткий ответ («не знаю») —
@@ -128,37 +148,67 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
    это сигнал, что текущий ход провалился. Не добавляй «ок» перед
    старым планом. Полностью перестрой ответ с учётом замечания.
 
-9. НЕ УХОДИ В BOTH РАНО.
-   addressed_to="BOTH" ЗАПРЕЩЁН, если выполняется ХОТЯ БЫ ОДНО:
+9. НЕ УХОДИ В BOTH РАНО, НО НЕ БОЙСЯ BOTH В НУЖНЫЙ МОМЕНТ.
+   addressed_to="BOTH" ЗАПРЕЩЁН в состояниях DEEPEN, DEESCALATE, CLARIFY,
+   а также если выполняется ХОТЯ БЫ ОДНО:
    — один партнёр только что дал длинную или уязвимую реплику
    — есть фидбек, путаница или протест
    — ядро конфликта ещё не названо
    — второй партнёр ещё не был реально услышан
-   — эмоция есть, а ясности ещё нет
-   BOTH уместен ТОЛЬКО: старт сессии, подтверждение договорённости, check-in.
+   BOTH ОБЯЗАТЕЛЕН в OPTIONS, AGREE, CHECK_IN — это совместные шаги.
+   В OPTIONS/AGREE всегда: addressed_to="BOTH", next_speaker="BOTH".
+   BOTH РАЗРЕШЁН в SETUP — старт сессии, оба ещё не высказались.
+
+10. НЕ ПОВТОРЯЙСЯ.
+   Перед каждым ходом проверь: я уже предлагал это? Я уже задавал этот вопрос?
+   Я уже использовал эту фразу-скелет?
+   Если да — СТОП. Найди другой тип хода:
+   — Был ВЫРАЗИТЬ → попробуй УСЛЫШАТЬ (включи второго).
+   — Был ПРОЯСНИТЬ → попробуй ВЫРАЗИТЬ (глубже к одному).
+   — Был ШАГНУТЬ и отвергли → вернись к ВЫРАЗИТЬ или ПРОЯСНИТЬ. НЕ предлагай
+     другой шаг. Вернись к боли: «Что стоит за тем, что это не подходит?»
+   — Были «маленький шаг» + «ритуал» + «время себе» → ВСЕ ТРИ — один паттерн.
+     Не маскируй один и тот же совет разными словами.
+   Если чувствуешь, что крутишься по кругу — скажи это прямо:
+   «Мы ходим по кругу. Давай попробуем с другой стороны.»
+
+11. ПЕРЕДАЧА СЛОВА ДОЛЖНА БЫТЬ ПСИХОЛОГИЧЕСКИ ЕСТЕСТВЕННОЙ.
+   Не переключай собеседника «по расписанию». Переключай по смыслу:
+   — Партнёр раскрылся → побудь с ним (ещё 1–2 хода минимум).
+   — Партнёр дал короткий ясный ответ → можно переключить.
+   — Хочешь, чтобы B услышал A → сначала заверши с A, потом мост:
+     «Люда, он говорит, что чувствует себя невидимым. Что ты слышишь?»
+   — Если переключаешь — объясни зачем (мост-фраза):
+     «Паша, спасибо. Люда, хочу услышать тебя — как это для тебя?»
+   АНТИПАТТЕРН: 3+ хода одному без единого обращения к другому.
+   Если 3 хода одному — на следующем ОБЯЗАТЕЛЬНО обратись ко второму.
 
 ### ПРИМЕРЫ ХОРОШИХ ОТВЕТОВ
 
+Это иллюстрации подхода — НЕ шаблоны для копирования.
+Каждый твой ответ должен звучать свежо, исходя из конкретной ситуации.
+
 ВЫРАЗИТЬ:
-«Паша, похоже, ты вкладываешься, а в ответ — тишина. Это обидно.
-Когда в последний раз ты это особенно остро почувствовал?»
+«Паша, ты готовишь ужин, убираешь — а она не замечает. И внутри растёт
+ощущение: я тут невидимый. В какой момент вчера это было особенно остро?»
 
 УСЛЫШАТЬ:
-«Она говорит, что ей одиноко, даже когда вы рядом. Это не упрёк — это боль.
-Паша, что ты слышишь в её словах?»
+«Она сейчас сказала: "мне одиноко, даже когда ты рядом". Это не упрёк.
+Паша, что ты слышишь за этими словами?»
 
 ПРОЯСНИТЬ:
-«Я слышу здесь столкновение: ты хочешь больше совместного времени,
-а он — больше пространства. Обоим от этого тяжело. Что стоит за твоей
-потребностью в близости — что ты боишься потерять?»
+«Здесь столкновение: ей нужно вместе — ему нужно своё пространство.
+И обоим от этого больно. Что ты боишься потерять, если дашь ему больше
+свободы?»
 
 СНИЗИТЬ:
-«Стоп. Сейчас вы оба на взводе — это нормально, значит тема важная.
-Давай притормозим. Как ты себя сейчас чувствуешь?»
+«Стоп. Вы оба сейчас говорите из защиты. Тема горячая — значит, важная.
+Что сейчас внутри — злость, обида или что-то третье?»
 
 ШАГНУТЬ:
-«Вы оба хотите больше тепла. Маленький шаг: на этой неделе один раз спросить
-"как ты?" и дослушать до конца. Готовы попробовать?»
+«Вы оба говорили, что не чувствуете себя услышанными. Конкретный
+эксперимент: вечером один говорит 3 минуты, второй пересказывает.
+Потом меняетесь. Попробуете завтра?»
 
 ### БЕЗОПАСНОСТЬ
 
@@ -231,6 +281,8 @@ STATE_GUIDELINES: dict[str, str] = {
         "Функция: ПРОЯСНИТЬ. Одно действие на этот ход:\n"
         "Задай один уточняющий вопрос тому, чьи слова непонятны.\n"
         "Не переходи к OPTIONS, пока оба не понимают друг друга.\n"
+        "HANDOFF: в CLARIFY addressed_to=BOTH допустим ТОЛЬКО для называния конфликта.\n"
+        "Обычный ход: addressed_to = тот, чьи слова непонятны. Не другой.\n"
         "Когда понимание есть → OPTIONS или DEEPEN."
     ),
     "DEESCALATE": (
@@ -245,8 +297,20 @@ STATE_GUIDELINES: dict[str, str] = {
         "Иначе: помоги назвать чувство или потребность — не анализируй.\n"
         "ПОБУДЬ С БОЛЬЮ ДОЛЬШЕ. Если партнёр показал уязвимость — не спеши дальше и не "
         "пытайся быть полезным действием.\n"
-        "Назови то, что услышал. Спроси: «что за этим стоит?», «когда это особенно остро?».\n"
+        "Назови то, что услышал. Задай НОВЫЙ вопрос — не тот, что уже задавал.\n"
+        "Варианты углубления (чередуй, не повторяй):\n"
+        "— «В какой момент вчера это было особенно остро?» (конкретная ситуация)\n"
+        "— «Когда он(а) так делает — что внутри первое? Злость, обида, страх?» (первичная эмоция)\n"
+        "— «Что тебе больше всего хочется услышать от него/неё?» (потребность)\n"
+        "— «Как это было в семье, где ты вырос(ла)?» (паттерн)\n"
         "НЕ предлагай шаги, решения, действия, ритуалы, договорённости. Это не твоя задача сейчас.\n"
+        "ЕСЛИ ТОЛЬКО ЧТО ВЕРНУЛСЯ ИЗ OPTIONS (отказ от шага) — НЕ возвращайся к OPTIONS\n"
+        "в ближайшие 4 хода. Копай глубже в чувства.\n"
+        "HANDOFF: в DEEPEN addressed_to=BOTH ЗАПРЕЩЁН. Адресуй тому, кого углубляешь.\n"
+        "Переключение на второго — НУЖНО и ВАЖНО, когда текущий дал ясный ответ:\n"
+        "подтверждение, короткий ответ, «да/нет», или назвал свою потребность.\n"
+        "Мост-фраза: «Она говорит X. Что ты слышишь в этих словах?»\n"
+        "Не держись за одного — второй тоже должен быть услышан.\n"
         "Когда потребность названа → CLARIFY (нужно понимание). OPTIONS — только если "
         "сервер разрешит (оба услышаны + конфликт назван)."
     ),
@@ -255,8 +319,17 @@ STATE_GUIDELINES: dict[str, str] = {
         "ПРОВЕРКА ПЕРЕД ШАГОМ: ты назвал боль каждого? Оба кивнули?\n"
         "Если в диалоге меньше 8 пользовательских ходов — OPTIONS запрещён, вернись к DEEPEN/CLARIFY.\n"
         "Конфликт назван живыми словами? Если нет — вернись к DEEPEN.\n"
-        "Предложи 2 конкретных варианта маленького шага на неделю "
-        "(предложи addressed_to='BOTH').\n"
+        "АДРЕСАЦИЯ (ОБЯЗАТЕЛЬНО): addressed_to=\"BOTH\", next_speaker=\"BOTH\".\n"
+        "ЗАПРЕЩЕНО: addressed_to=\"A\" или addressed_to=\"B\" в OPTIONS.\n"
+        "Это совместный шаг — обращайся к обоим: «Вы оба...», «Каждый из вас...».\n"
+        "НЕ начинай сообщение с имени одного партнёра.\n"
+        "Предложи 1-2 конкретных варианта действия.\n"
+        "ШАГИ ДОЛЖНЫ ВЫТЕКАТЬ ИЗ КОНКРЕТНОЙ БОЛИ, которую назвали в DEEPEN.\n"
+        "НЕ предлагай шаблонные шаги: «маленький шаг», «ритуал», «время себе»,\n"
+        "«один вечер», «созвон», «контакт на неделе». Это canned phrases.\n"
+        "Хороший шаг — это ПОВЕДЕНЧЕСКИЙ ЭКСПЕРИМЕНТ: что конкретно сделать, когда, как.\n"
+        "Пример: «Завтра вечером: один говорит 3 минуты без перебиваний,\n"
+        "второй пересказывает. Потом меняетесь.»\n"
         "ЕСЛИ ПАРТНЁР ОТВЕРГАЕТ ШАГИ — НЕ предлагай новые. Скажи:\n"
         "«Значит, мы ещё не дошли до сути. Что за этим стоит?» → DEEPEN.\n"
         "Если уже был отказ от шагов или похожее предложение недавно провалилось — не повторяй action cycle, "
@@ -265,8 +338,11 @@ STATE_GUIDELINES: dict[str, str] = {
     ),
     "AGREE": (
         "Функция: ШАГНУТЬ. Одно действие на этот ход:\n"
-        "Зафиксируй договорённость: кто, что, когда "
-        "(предложи addressed_to='BOTH').\n"
+        "АДРЕСАЦИЯ (ОБЯЗАТЕЛЬНО): addressed_to=\"BOTH\", next_speaker=\"BOTH\".\n"
+        "ЗАПРЕЩЕНО: addressed_to=\"A\" или addressed_to=\"B\" в AGREE.\n"
+        "Зафиксируй договорённость: кто, что, когда.\n"
+        "Обращайся к обоим: «Вы договорились...», «Итого: {имя_a} делает X, {имя_b} делает Y».\n"
+        "НЕ начинай сообщение с имени одного партнёра.\n"
         "Когда оба подтвердили → CHECK_IN."
     ),
     "CHECK_IN": (
@@ -376,7 +452,30 @@ class ClaudeService:
         """Динамический контекст диалога для GPT (без привязки к времени)."""
         return self._developer_prompt_for_state(session, session.dialogue_state)
 
-    def _developer_prompt_for_state(self, session: SessionState, effective_state: str) -> str:
+    @classmethod
+    def _recent_handoff_context(cls, messages: list[dict], limit: int = 6) -> str:
+        """Build a short summary of recent speaker turns for handoff awareness."""
+        turns: list[str] = []
+        for item in reversed(messages):
+            role = item.get("role", "")
+            content = item.get("content", "")
+            if role == "user":
+                parsed = cls._extract_user_turn(content)
+                if parsed:
+                    speaker, text = parsed
+                    short = text[:40].replace("\n", " ")
+                    turns.append(f"  [{speaker}]: {short}...")
+            elif role == "assistant":
+                short = content[:40].replace("\n", " ")
+                turns.append(f"  [BOT]: {short}...")
+            if len(turns) >= limit:
+                break
+        if not turns:
+            return ""
+        turns.reverse()
+        return "Последние ходы (для handoff awareness):\n" + "\n".join(turns) + "\n"
+
+    def _developer_prompt_for_state(self, session: SessionState, effective_state: str, messages: list[dict] | None = None) -> str:
         """Динамический контекст диалога с возможным server-side override состояния."""
         name_a = session.name_a or "A"
         name_b = session.name_b or "B"
@@ -386,31 +485,125 @@ class ClaudeService:
             f"{name_a} и {name_b}"
         )
 
+        # In OPTIONS/AGREE/CHECK_IN — always allow (and encourage) BOTH
+        both_allowed_states = ("OPTIONS", "AGREE", "CHECK_IN")
+        is_both_state = effective_state in both_allowed_states
+
         if session.waiting_for == "BOTH":
             addressing_rule = (
                 f"РЕЖИМ BOTH — оба партнёра отвечают:\n"
                 f"  addressed_to=\"BOTH\", next_speaker=\"BOTH\".\n"
-                f"  Задай ОДИН и тот же вопрос обоим — «каждый из вас» / «вы оба».\n"
-                f"  Не обращайся по именам к каждому отдельно с разными вопросами.\n"
+                f"  Обращайся к обоим: «Вы оба...», «Каждый из вас...».\n"
+                f"  НЕ начинай сообщение с имени одного партнёра.\n"
+                f"  НЕ задавай разные вопросы каждому отдельно.\n"
             )
         elif session.waiting_for == "A":
-            addressing_rule = (
-                f"ПРАВИЛО АДРЕСАЦИИ:\n"
-                f"  Следующий отвечает: {name_a}.\n"
-                f"  Сообщение ДОЛЖНО начинаться с «{name_a},».\n"
-                f"  НЕЛЬЗЯ начинать с «{name_b}» — {name_b} только что говорил(а).\n"
-                f"  Для отражения слов {name_b} — используй третье лицо.\n"
-                f"  addressed_to=\"A\", next_speaker=\"A\".\n"
-            )
+            if is_both_state:
+                addressing_rule = (
+                    f"ПРАВИЛО АДРЕСАЦИИ (состояние {effective_state}):\n"
+                    f"  В {effective_state} ОБЯЗАТЕЛЬНО: addressed_to=\"BOTH\", next_speaker=\"BOTH\".\n"
+                    f"  Обращайся к обоим: «Вы оба...», «Каждый из вас...».\n"
+                    f"  НЕ начинай с имени одного партнёра.\n"
+                    f"  Для отражения слов {name_b} — используй третье лицо.\n"
+                )
+            else:
+                addressing_rule = (
+                    f"ПРАВИЛО АДРЕСАЦИИ:\n"
+                    f"  По умолчанию отвечает: {name_a}.\n"
+                    f"  Сообщение начинай с «{name_a},».\n"
+                    f"  Для отражения слов {name_b} — используй третье лицо.\n"
+                    f"  addressed_to=\"A\", next_speaker=\"A\".\n"
+                    f"  НО: если {name_a} уже дал ясный/короткий ответ и ты побыл с ним 2+ хода —\n"
+                    f"  ПЕРЕКЛЮЧИ на {name_b} с мост-фразой. addressed_to=\"B\".\n"
+                )
         else:
-            addressing_rule = (
-                f"ПРАВИЛО АДРЕСАЦИИ:\n"
-                f"  Следующий отвечает: {name_b}.\n"
-                f"  Сообщение ДОЛЖНО начинаться с «{name_b},».\n"
-                f"  НЕЛЬЗЯ начинать с «{name_a}» — {name_a} только что говорил(а).\n"
-                f"  Для отражения слов {name_a} — используй третье лицо.\n"
-                f"  addressed_to=\"B\", next_speaker=\"B\".\n"
-            )
+            if is_both_state:
+                addressing_rule = (
+                    f"ПРАВИЛО АДРЕСАЦИИ (состояние {effective_state}):\n"
+                    f"  В {effective_state} ОБЯЗАТЕЛЬНО: addressed_to=\"BOTH\", next_speaker=\"BOTH\".\n"
+                    f"  Обращайся к обоим: «Вы оба...», «Каждый из вас...».\n"
+                    f"  НЕ начинай с имени одного партнёра.\n"
+                    f"  Для отражения слов {name_a} — используй третье лицо.\n"
+                )
+            else:
+                addressing_rule = (
+                    f"ПРАВИЛО АДРЕСАЦИИ:\n"
+                    f"  По умолчанию отвечает: {name_b}.\n"
+                    f"  Сообщение начинай с «{name_b},».\n"
+                    f"  Для отражения слов {name_a} — используй третье лицо.\n"
+                    f"  addressed_to=\"B\", next_speaker=\"B\".\n"
+                    f"  НО: если {name_b} уже дал ясный/короткий ответ и ты побыл с ним 2+ хода —\n"
+                    f"  ПЕРЕКЛЮЧИ на {name_a} с мост-фразой. addressed_to=\"A\".\n"
+                )
+
+        # Build handoff context from message history
+        handoff_ctx = ""
+        consecutive_info = ""
+        last_answer_hint = ""
+        repetition_warning = ""
+        if messages:
+            handoff_ctx = self._recent_handoff_context(messages)
+            # Detect bot repetition patterns
+            rep_info = self._detect_bot_repetition(messages)
+            if rep_info["repeated_interventions"] or rep_info["repeated_phrases"]:
+                patterns = rep_info.get("recent_patterns", [])
+                patterns_str = ", ".join(f"«{p}»" for p in patterns[:5]) if patterns else "шаблонные фразы"
+                repetition_warning = (
+                    f"⚠ АНТИПОВТОР: ты уже использовал в недавних ходах: {patterns_str}.\n"
+                    f"  ЗАПРЕЩЕНО повторять эти паттерны. Используй ДРУГОЙ тип хода.\n"
+                    f"  Если был ШАГНУТЬ → вернись к ВЫРАЗИТЬ или ПРОЯСНИТЬ.\n"
+                    f"  Если были шаблонные фразы → перефразируй полностью.\n"
+                )
+            # Characterize last user answer for natural switch guidance
+            last_turns = self._recent_user_turns(messages, limit=1)
+            if last_turns:
+                last_speaker_label, last_text = last_turns[0]
+                last_name = name_a if last_speaker_label == "A" else name_b
+                other_name = name_b if last_speaker_label == "A" else name_a
+                other_label = "B" if last_speaker_label == "A" else "A"
+                word_count = len(last_text.split())
+                is_vulnerable = self._last_user_message_is_vulnerable(messages)
+                if is_vulnerable:
+                    last_answer_hint = f"Последний ответ {last_name}: уязвимый/эмоциональный ({word_count} слов) → побудь с ним.\n"
+                elif word_count <= 8 and not is_both_state:
+                    last_answer_hint = (
+                        f"Последний ответ {last_name}: короткий/ясный ({word_count} слов).\n"
+                        f"→ ПЕРЕКЛЮЧИ на {other_name}. addressed_to=\"{other_label}\", next_speaker=\"{other_label}\".\n"
+                        f"  Мост-фраза: «{last_name}, спасибо. {other_name}, хочу услышать тебя — как это для тебя?»\n"
+                    )
+                    # Override addressing_rule to make switch the default
+                    addressing_rule = (
+                        f"ПРАВИЛО АДРЕСАЦИИ (natural switch):\n"
+                        f"  {last_name} дал короткий ясный ответ → ПЕРЕКЛЮЧИ на {other_name}.\n"
+                        f"  addressed_to=\"{other_label}\", next_speaker=\"{other_label}\".\n"
+                        f"  Сообщение начинай с мост-фразы к {other_name}.\n"
+                        f"  Для отражения слов {last_name} — используй третье лицо.\n"
+                    )
+                else:
+                    last_answer_hint = f"Последний ответ {last_name}: содержательный ({word_count} слов).\n"
+            # Count consecutive turns by same speaker
+            consec_count, consec_speaker = self._consecutive_same_speaker(messages)
+            if consec_count >= 2 and consec_speaker in ("A", "B"):
+                speaker_name = name_a if consec_speaker == "A" else name_b
+                other = name_b if consec_speaker == "A" else name_a
+                other_label = "B" if consec_speaker == "A" else "A"
+                if consec_count >= 3:
+                    # OVERRIDE addressing_rule entirely — no contradictions
+                    addressing_rule = (
+                        f"⚠ ПРИНУДИТЕЛЬНАЯ ПЕРЕДАЧА СЛОВА:\n"
+                        f"  {speaker_name} ({consec_speaker}) отвечал(а) {consec_count} ход(а/ов) подряд.\n"
+                        f"  Следующий отвечает: {other} ({other_label}).\n"
+                        f"  Сообщение ДОЛЖНО начинаться с «{other},».\n"
+                        f"  НЕЛЬЗЯ начинать с «{speaker_name}».\n"
+                        f"  Для отражения слов {speaker_name} — используй третье лицо.\n"
+                        f"  addressed_to=\"{other_label}\", next_speaker=\"{other_label}\".\n"
+                        f"  Пример: «{other}, он(а) говорит, что [краткое отражение]. Как это для тебя?»\n"
+                    )
+                else:
+                    consecutive_info = (
+                        f"⚠ HANDOFF: {speaker_name} ({consec_speaker}) отвечал(а) {consec_count} ход(а/ов) подряд.\n"
+                        f"Подумай, не пора ли передать слово {other} ({other_label}).\n"
+                    )
 
         return (
             f"Текущее состояние диалога:\n"
@@ -426,11 +619,66 @@ class ClaudeService:
             f"- Краткое резюме последнего хода: {session.last_turn_summary or 'начало диалога'}\n"
             f"- risk_flag: {session.risk_flag}\n"
             f"\n"
+            + last_answer_hint
+            + consecutive_info
+            + repetition_warning
             + addressing_rule
+            + "\n"
+            + handoff_ctx
             + "\n"
             f"Руководство для состояния {effective_state}:\n"
             f"{STATE_GUIDELINES.get(effective_state, STATE_GUIDELINES['CLARIFY'])}"
         )
+
+    @classmethod
+    def _consecutive_same_speaker(cls, messages: list[dict]) -> tuple[int, str]:
+        """Count how many consecutive user turns come from the same speaker (most recent)."""
+        count = 0
+        last_speaker = ""
+        for item in reversed(messages):
+            if item.get("role") != "user":
+                continue
+            parsed = cls._extract_user_turn(item.get("content", ""))
+            if parsed is None:
+                continue
+            speaker, _ = parsed
+            if speaker == "BOTH":
+                break
+            if not last_speaker:
+                last_speaker = speaker
+            if speaker == last_speaker:
+                count += 1
+            else:
+                break
+        return count, last_speaker
+
+    @classmethod
+    def _last_user_speaker(cls, messages: list[dict]) -> str:
+        """Return the label of the most recent user speaker (A, B, or BOTH)."""
+        for item in reversed(messages):
+            if item.get("role") != "user":
+                continue
+            parsed = cls._extract_user_turn(item.get("content", ""))
+            if parsed:
+                return parsed[0]
+        return ""
+
+    @classmethod
+    def _last_user_message_is_vulnerable(cls, messages: list[dict]) -> bool:
+        """Heuristic: check if last user message contains vulnerability markers."""
+        turns = cls._recent_user_turns(messages, limit=1)
+        if not turns:
+            return False
+        _, text = turns[0]
+        vulnerability_markers = (
+            "больно", "страшно", "одинок", "одинок", "плачу", "плакал",
+            "не нужн", "брошен", "невидим", "не слыш", "не замеча",
+            "устал", "не могу больше", "хочу уйти", "разлюбил",
+            "не люб", "предал", "обидно", "стыдно", "виноват",
+            "боюсь", "теряю", "потеря", "пустота", "безнадежн",
+            "не знаю как жить", "не вижу смысл",
+        )
+        return cls._contains_any(text, vulnerability_markers)
 
     @staticmethod
     def _normalize_text(value: str) -> str:
@@ -497,6 +745,72 @@ class ClaudeService:
                     count += 1
         return count
 
+    # Canned intervention patterns for repetition detection
+    _CANNED_INTERVENTION_MARKERS: tuple[str, ...] = (
+        "маленький шаг", "на этой неделе", "готовы попробовать",
+        "один вечер", "время себе", "созвон", "ритуал",
+        "контакт на неделе", "один раз спросить", "попробуйте",
+        "что одно маленькое", "что вы готовы", "поведенческий эксперимент",
+    )
+    _CANNED_PHRASING_MARKERS: tuple[str, ...] = (
+        "похоже, тебе важно", "что стоит за этим", "это нормально",
+        "давай притормозим", "как ты себя сейчас чувствуешь",
+        "что ты слышишь в", "как это для тебя",
+    )
+
+    @classmethod
+    def _detect_bot_repetition(cls, messages: list[dict]) -> dict[str, bool | list[str]]:
+        """Scan recent bot messages for repeated intervention patterns.
+
+        Returns dict with:
+          repeated_interventions: bool
+          repeated_phrases: bool
+          recent_patterns: list of matched patterns (for prompt injection)
+        """
+        recent_bot_texts: list[str] = []
+        for item in reversed(messages):
+            if item.get("role") == "assistant":
+                recent_bot_texts.append(item.get("content", ""))
+                if len(recent_bot_texts) >= 4:
+                    break
+
+        if len(recent_bot_texts) < 2:
+            return {"repeated_interventions": False, "repeated_phrases": False, "recent_patterns": []}
+
+        # Check for repeated intervention types
+        intervention_counts: dict[str, int] = {}
+        for text in recent_bot_texts:
+            normalized = cls._normalize_text(text)
+            for marker in cls._CANNED_INTERVENTION_MARKERS:
+                if marker in normalized:
+                    intervention_counts[marker] = intervention_counts.get(marker, 0) + 1
+
+        repeated_interventions = any(count >= 2 for count in intervention_counts.values())
+
+        # Check for repeated canned phrases
+        phrase_counts: dict[str, int] = {}
+        for text in recent_bot_texts:
+            normalized = cls._normalize_text(text)
+            for marker in cls._CANNED_PHRASING_MARKERS:
+                if marker in normalized:
+                    phrase_counts[marker] = phrase_counts.get(marker, 0) + 1
+
+        repeated_phrases = any(count >= 2 for count in phrase_counts.values())
+
+        recent_patterns: list[str] = []
+        for marker, count in intervention_counts.items():
+            if count >= 2:
+                recent_patterns.append(marker)
+        for marker, count in phrase_counts.items():
+            if count >= 2:
+                recent_patterns.append(marker)
+
+        return {
+            "repeated_interventions": repeated_interventions,
+            "repeated_phrases": repeated_phrases,
+            "recent_patterns": recent_patterns,
+        }
+
     _ACTION_REJECTION_MARKERS: tuple[str, ...] = (
         "мы пробовали", "это не поможет", "не то", "не подходит",
         "уже пытались", "не работает", "бесполезно", "не хочу",
@@ -523,6 +837,24 @@ class ClaudeService:
     @classmethod
     def _assistant_looks_like_action_proposal(cls, text: str) -> bool:
         return cls._contains_any(text, cls._ACTION_PROPOSAL_MARKERS)
+
+    MIN_TURNS_AFTER_REJECTION = 4  # Block OPTIONS for N user turns after rejection
+
+    @classmethod
+    def _turns_since_last_rejection(cls, messages: list[dict]) -> int | None:
+        """Count user turns since the most recent action rejection. None if no rejection found."""
+        user_turns_since = 0
+        for item in reversed(messages):
+            if item.get("role") != "user":
+                continue
+            parsed = cls._extract_user_turn(item.get("content", ""))
+            if parsed is None:
+                continue
+            _, text = parsed
+            if cls._contains_any(text, cls._ACTION_REJECTION_MARKERS):
+                return user_turns_since
+            user_turns_since += 1
+        return None
 
     @classmethod
     def _recent_action_loop_detected(cls, messages: list[dict]) -> bool:
@@ -593,6 +925,21 @@ class ClaudeService:
             )
             return "DEEPEN"
 
+        # Block OPTIONS/AGREE if too soon after rejection (cooldown)
+        if session.dialogue_state in ("OPTIONS", "AGREE"):
+            turns_since = self._turns_since_last_rejection(messages)
+            if turns_since is not None and turns_since < self.MIN_TURNS_AFTER_REJECTION:
+                fallback_state = self._fallback_state_from_messages(messages)
+                log.info(
+                    "blocked_options_cooldown_after_rejection",
+                    session_id=session.session_id,
+                    original_state=session.dialogue_state,
+                    turns_since_rejection=turns_since,
+                    min_required=self.MIN_TURNS_AFTER_REJECTION,
+                    effective_state=fallback_state,
+                )
+                return fallback_state
+
         log.info(
             "state_kept_original",
             session_id=session.session_id,
@@ -633,7 +980,7 @@ class ClaudeService:
 
         messages = await self._get_history(session.session_id, repo)
         effective_state = self._resolve_effective_state(session, messages)
-        system_content = SYSTEM_PROMPT + "\n\n" + self._developer_prompt_for_state(session, effective_state)
+        system_content = SYSTEM_PROMPT + "\n\n" + self._developer_prompt_for_state(session, effective_state, messages)
 
         response = await self._with_retry(
             "chat_completion",
@@ -710,6 +1057,114 @@ class ClaudeService:
             )
             next_speaker = "BOTH"
 
+        # Track whether server overrode handoff (prevents facilitator guardrail from reverting)
+        server_handoff_override = False
+
+        # Post-response guard: force BOTH in OPTIONS/AGREE (these are joint steps)
+        if next_speaker in ("A", "B") and effective_state in ("OPTIONS", "AGREE"):
+            log.info(
+                "post_guard_forced_both_in_joint_state",
+                session_id=session.session_id,
+                effective_state=effective_state,
+                was_speaker=next_speaker,
+            )
+            next_speaker = "BOTH"
+            addressed_to = "BOTH"
+            server_handoff_override = True
+
+        # Post-response guard: fix mixed address for BOTH
+        # If next_speaker=BOTH but message starts with one partner's name, strip the name
+        if next_speaker == "BOTH":
+            for check_name, check_label in ((name_a, "A"), (name_b, "B")):
+                if self._starts_with_partner_name(message, check_name):
+                    # Remove the name prefix to avoid mixed address
+                    stripped = message.lstrip()
+                    lower_name = check_name.strip().lower()
+                    lower_msg = stripped.lower()
+                    if lower_msg.startswith(f"{lower_name},"):
+                        message = stripped[len(check_name) + 1:].lstrip()
+                    elif lower_msg.startswith(f"{lower_name}:"):
+                        message = stripped[len(check_name) + 1:].lstrip()
+                    log.info(
+                        "post_guard_stripped_name_from_both",
+                        session_id=session.session_id,
+                        stripped_name=check_name,
+                    )
+                    server_handoff_override = True
+                    break
+
+        # Post-response guard: block BOTH in DEEPEN/DEESCALATE/CLARIFY
+        # (BOTH is allowed in OPTIONS/AGREE/CHECK_IN/SETUP)
+        if next_speaker == "BOTH" and effective_state in ("DEEPEN", "DEESCALATE", "CLARIFY"):
+            last_speaker = self._last_user_speaker(messages)
+            if last_speaker in ("A", "B"):
+                log.info(
+                    "post_guard_blocked_both_in_deepen",
+                    session_id=session.session_id,
+                    effective_state=effective_state,
+                    forced_speaker=last_speaker,
+                )
+                next_speaker = last_speaker
+                addressed_to = last_speaker
+                server_handoff_override = True
+
+        # Post-response guard: block BOTH after vulnerability (not in OPTIONS/AGREE/CHECK_IN)
+        if (next_speaker == "BOTH"
+                and effective_state not in ("OPTIONS", "AGREE", "CHECK_IN", "SETUP")
+                and self._last_user_message_is_vulnerable(messages)):
+            last_speaker = self._last_user_speaker(messages)
+            if last_speaker in ("A", "B"):
+                log.info(
+                    "post_guard_blocked_both_after_vulnerability",
+                    session_id=session.session_id,
+                    forced_speaker=last_speaker,
+                )
+                next_speaker = last_speaker
+                addressed_to = last_speaker
+                server_handoff_override = True
+
+        # Post-response guard: natural switch after short/clear answer
+        # If last answer was short (<=8 words), not vulnerable, same speaker 2+ consecutive,
+        # and GPT still returns the same speaker — force switch
+        if not server_handoff_override and effective_state not in ("OPTIONS", "AGREE", "CHECK_IN", "SETUP"):
+            last_turns_for_switch = self._recent_user_turns(messages, limit=1)
+            if last_turns_for_switch:
+                sw_speaker_label, sw_text = last_turns_for_switch[0]
+                sw_word_count = len(sw_text.split())
+                sw_consec, sw_consec_speaker = self._consecutive_same_speaker(messages)
+                if (sw_word_count <= 8
+                        and sw_consec >= 2
+                        and sw_consec_speaker in ("A", "B")
+                        and next_speaker == sw_consec_speaker
+                        and not self._last_user_message_is_vulnerable(messages)):
+                    other = "B" if sw_consec_speaker == "A" else "A"
+                    log.info(
+                        "post_guard_natural_switch_short_answer",
+                        session_id=session.session_id,
+                        word_count=sw_word_count,
+                        consecutive=sw_consec,
+                        was_speaker=sw_consec_speaker,
+                        forced_speaker=other,
+                    )
+                    next_speaker = other
+                    addressed_to = other
+                    server_handoff_override = True
+
+        # Post-response guard: force switch after 3+ consecutive turns to same speaker
+        consec_count, consec_speaker = self._consecutive_same_speaker(messages)
+        if consec_count >= 3 and consec_speaker in ("A", "B") and next_speaker == consec_speaker:
+            other = "B" if consec_speaker == "A" else "A"
+            log.info(
+                "post_guard_forced_switch_consecutive",
+                session_id=session.session_id,
+                consecutive_turns=consec_count,
+                was_speaker=consec_speaker,
+                forced_speaker=other,
+            )
+            next_speaker = other
+            addressed_to = other
+            server_handoff_override = True
+
         # Обновляем state machine и async context (caller сохранит сессию)
         valid_states = {"SETUP", "CLARIFY", "DEESCALATE", "DEEPEN", "OPTIONS", "AGREE", "CHECK_IN"}
 
@@ -755,6 +1210,20 @@ class ClaudeService:
             )
             next_state = "DEEPEN"
 
+        # Post-response guard: block next_state jump to OPTIONS if cooldown active
+        if next_state in ("OPTIONS", "AGREE"):
+            turns_since = self._turns_since_last_rejection(messages)
+            if turns_since is not None and turns_since < self.MIN_TURNS_AFTER_REJECTION:
+                fallback_state = self._fallback_state_from_messages(messages)
+                log.info(
+                    "post_guard_options_cooldown",
+                    session_id=session.session_id,
+                    model_wanted=next_state,
+                    turns_since_rejection=turns_since,
+                    forced_state=fallback_state,
+                )
+                next_state = fallback_state
+
         if next_state in valid_states:
             session.dialogue_state = next_state
         session.last_turn_summary = message[:150].strip()
@@ -769,6 +1238,7 @@ class ClaudeService:
             "dialogue_state_after": session.dialogue_state,
             "waiting_for_before": waiting_for_before,
             "risk_flag": risk_flag,
+            "server_handoff_override": server_handoff_override,
         }
 
         return message, risk_flag, next_speaker, response_meta
