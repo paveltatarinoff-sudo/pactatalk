@@ -564,7 +564,14 @@ class ClaudeService:
         turns.reverse()
         return "Последние ходы (для handoff awareness):\n" + "\n".join(turns) + "\n"
 
-    def _developer_prompt_for_state(self, session: SessionState, effective_state: str, messages: list[dict] | None = None) -> str:
+    def _developer_prompt_for_state(
+        self,
+        session: SessionState,
+        effective_state: str,
+        messages: list[dict] | None = None,
+        address_feedback: bool = False,
+        feedback_target: str | None = None,
+    ) -> str:
         """Динамический контекст диалога с возможным server-side override состояния."""
         name_a = session.name_a or "A"
         name_b = session.name_b or "B"
@@ -630,8 +637,17 @@ class ClaudeService:
         consecutive_info = ""
         last_answer_hint = ""
         repetition_warning = ""
+        feedback_hint = ""
         if messages:
             handoff_ctx = self._recent_handoff_context(messages)
+            if address_feedback and feedback_target in ("A", "B"):
+                feedback_name = name_a if feedback_target == "A" else name_b
+                feedback_hint = (
+                    f"⚠ ADDRESS FEEDBACK:\n"
+                    f"  Пользователь сказал, что ход/адресация были перепутаны.\n"
+                    f"  Коротко признай это и ВЕРНИСЬ к {feedback_name}.\n"
+                    f"  addressed_to=\"{feedback_target}\", next_speaker=\"{feedback_target}\".\n"
+                )
             # Detect bot repetition patterns
             rep_info = self._detect_bot_repetition(messages)
             if rep_info["repeated_interventions"] or rep_info["repeated_phrases"]:
@@ -739,6 +755,7 @@ class ClaudeService:
             + last_answer_hint
             + consecutive_info
             + repetition_warning
+            + feedback_hint
             + addressing_rule
             + "\n"
             + handoff_ctx
@@ -746,6 +763,25 @@ class ClaudeService:
             f"Руководство для состояния {effective_state}:\n"
             f"{state_guidelines}"
         )
+
+    @classmethod
+    def _apply_handoff_coherence_check(
+        cls,
+        *,
+        session: SessionState,
+        message: str,
+        original_addressed_to: str,
+        final_next_speaker: str,
+    ) -> tuple[str, str | None]:
+        """Block server overrides that would make text and turn routing disagree."""
+        if original_addressed_to not in ("A", "B") or final_next_speaker == original_addressed_to:
+            return final_next_speaker, None
+
+        original_name = session.name_a if original_addressed_to == "A" else session.name_b
+        if original_name and cls._starts_with_partner_name(message, original_name):
+            return original_addressed_to, "text_starts_with_original_addressee"
+
+        return final_next_speaker, None
 
     @classmethod
     def _consecutive_same_speaker(cls, messages: list[dict]) -> tuple[int, str]:
@@ -1153,6 +1189,8 @@ class ClaudeService:
         user_message: str,
         sender_label: str,
         repo,
+        address_feedback: bool = False,
+        feedback_target: str | None = None,
     ) -> tuple[str, bool, str, dict[str, str | bool]]:
         """
         Отправить сообщение фасилитатору и получить структурированный ответ.
@@ -1167,7 +1205,13 @@ class ClaudeService:
 
         messages = await self._get_history(session.session_id, repo)
         effective_state = self._resolve_effective_state(session, messages)
-        system_content = SYSTEM_PROMPT + "\n\n" + self._developer_prompt_for_state(session, effective_state, messages)
+        system_content = SYSTEM_PROMPT + "\n\n" + self._developer_prompt_for_state(
+            session,
+            effective_state,
+            messages,
+            address_feedback=address_feedback,
+            feedback_target=feedback_target,
+        )
 
         response = await self._with_retry(
             "chat_completion",
@@ -1199,6 +1243,7 @@ class ClaudeService:
         risk_flag: bool = bool(data.get("risk_flag", False))
         addressed_to: str = data.get("addressed_to", next_speaker)
         next_state: str = data.get("next_state", session.dialogue_state)
+        original_gpt_addressed_to = addressed_to if addressed_to in ("A", "B", "BOTH") else "BOTH"
 
         log.info(
             "gpt_response",
@@ -1246,6 +1291,17 @@ class ClaudeService:
 
         # Track whether server overrode handoff (prevents facilitator guardrail from reverting)
         server_handoff_override = False
+
+        if address_feedback and feedback_target in ("A", "B") and next_speaker != feedback_target:
+            log.info(
+                "post_guard_feedback_handoff_override",
+                session_id=session.session_id,
+                feedback_target=feedback_target,
+                next_speaker_was=next_speaker,
+            )
+            next_speaker = feedback_target
+            addressed_to = feedback_target
+            server_handoff_override = True
 
         # Post-response guard: force BOTH in OPTIONS/AGREE (these are joint steps)
         if next_speaker in ("A", "B") and effective_state in ("OPTIONS", "AGREE"):
@@ -1351,6 +1407,24 @@ class ClaudeService:
             )
             next_speaker = other
             addressed_to = other
+            server_handoff_override = True
+
+        coherent_next_speaker, coherence_reason = self._apply_handoff_coherence_check(
+            session=session,
+            message=message,
+            original_addressed_to=original_gpt_addressed_to,
+            final_next_speaker=next_speaker,
+        )
+        if coherence_reason is not None:
+            log.info(
+                "post_guard_handoff_coherence_blocked_override",
+                session_id=session.session_id,
+                reason=coherence_reason,
+                original_addressed_to=original_gpt_addressed_to,
+                final_next_speaker=next_speaker,
+            )
+            next_speaker = coherent_next_speaker
+            addressed_to = coherent_next_speaker
             server_handoff_override = True
 
         # Обновляем state machine и async context (caller сохранит сессию)
