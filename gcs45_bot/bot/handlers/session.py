@@ -238,6 +238,12 @@ async def _process_join(
         chat_a = await bot.get_chat(session.user_a_id)
         partner_name = chat_a.first_name or chat_a.username or "Партнёр"
     except Exception:
+        log.warning(
+            "get_chat_failed_fallback_name",
+            context="join_partner_name",
+            session_id=session.session_id,
+            user_id=session.user_a_id,
+        )
         partner_name = "Партнёр"
     partner_name = html.escape(partner_name)
 
@@ -245,6 +251,12 @@ async def _process_join(
         chat_b = await bot.get_chat(user_id)
         joiner_name = chat_b.first_name or chat_b.username or "Партнёр"
     except Exception:
+        log.warning(
+            "get_chat_failed_fallback_name",
+            context="join_joiner_name",
+            session_id=session.session_id,
+            user_id=user_id,
+        )
         joiner_name = "Партнёр"
     joiner_name = html.escape(joiner_name)
 
@@ -262,7 +274,11 @@ async def _process_join(
             f"{joiner_name} присоединился к сессии!\n\nОжидаем его подтверждения...",
         )
     except Exception:
-        pass
+        log.warning(
+            "session_join_notify_a_failed",
+            session_id=session.session_id,
+            user_id=session.user_a_id,
+        )
 
 
 # ─── Подтверждение присоединения ─────────────────────────────────────────────
@@ -294,11 +310,23 @@ async def cb_join_confirm(
         chat_a = await bot.get_chat(session.user_a_id)
         session.name_a = chat_a.first_name or chat_a.username or "Партнёр A"
     except Exception:
+        log.warning(
+            "get_chat_failed_fallback_name",
+            context="join_confirm_name_a",
+            session_id=session.session_id,
+            user_id=session.user_a_id,
+        )
         session.name_a = "Партнёр A"
     try:
         chat_b = await bot.get_chat(user_id)
         session.name_b = chat_b.first_name or chat_b.username or "Партнёр B"
     except Exception:
+        log.warning(
+            "get_chat_failed_fallback_name",
+            context="join_confirm_name_b",
+            session_id=session.session_id,
+            user_id=user_id,
+        )
         session.name_b = "Партнёр B"
 
     repo = SessionRepository(redis, session_factory)
@@ -339,7 +367,11 @@ async def cb_join_confirm(
         )
         await state.storage.set_state(key=storage_key_a, state=SessionFlow.opening)
     except Exception:
-        pass  # некритично — facilitator работает без FSM-фильтра
+        log.warning(
+            "session_join_set_state_a_failed",
+            session_id=session.session_id,
+            user_id=session.user_a_id,
+        )
 
     if session.resume_context:
         common_intro = _resume_confirmation_intro(session)
@@ -424,7 +456,11 @@ async def cb_join_decline(
                 reply_markup=main_menu_keyboard(),
             )
         except Exception:
-            pass
+            log.warning(
+                "session_join_decline_notify_a_failed",
+                session_id=session.session_id,
+                user_id=session.user_a_id,
+            )
         await repo.delete(session)
     await state.clear()
     await callback.message.answer(
