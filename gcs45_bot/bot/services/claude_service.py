@@ -744,10 +744,6 @@ class ClaudeService:
             f"- Сейчас говорит: {current_speaker_name} (waiting_for={session.waiting_for})\n"
             f"- current_state: {effective_state}\n"
             f"- original_state: {session.dialogue_state}\n"
-            f"- Цель {name_a}: {session.goal_a or 'не указана'}\n"
-            f"- Цель {name_b}: {session.goal_b or 'не указана'}\n"
-            f"- Совместная цель: {session.goal_joint or 'не сформулирована'}\n"
-            f"- Последняя тема: {session.topic_current or 'начало диалога'}\n"
             f"- Краткое резюме последнего хода: {session.last_turn_summary or 'начало диалога'}\n"
             f"- risk_flag: {session.risk_flag}\n"
             + resume_block
