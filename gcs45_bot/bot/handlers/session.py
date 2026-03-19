@@ -412,7 +412,7 @@ async def cb_end_session(
         await redis.set(f"summary:{session.user_a_id}", summary_text, ex=summary_ttl)
         await redis.set(f"summary:{session.user_b_id}", summary_text, ex=summary_ttl)
     except Exception:
-        pass
+        log.warning("session_summary_save_failed", session_id=session.session_id)
 
     # Generate and save resume context for next session (P3.1)
     try:

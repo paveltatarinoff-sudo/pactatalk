@@ -323,7 +323,11 @@ async def _collect_for_both(
             try:
                 await bot.send_message(uid, both_answers)
             except Exception:
-                pass
+                log.warning(
+                    "both_relay_delivery_failed",
+                    session_id=session.session_id,
+                    target_user_id=uid,
+                )
     session.pending_a_message = ""
     session.pending_b_message = ""
     await repo.save(session)
@@ -398,7 +402,11 @@ async def _collect_for_both(
             try:
                 await bot.send_message(uid, full_reply, reply_markup=keyboard)
             except Exception:
-                pass
+                log.warning(
+                    "both_bot_reply_delivery_failed",
+                    session_id=session.session_id,
+                    target_user_id=uid,
+                )
 
 
 # ─── Обычный ход (один отправитель) ──────────────────────────────────────────
@@ -508,7 +516,11 @@ async def _process_turn(
             try:
                 await bot.send_message(uid, full_reply, reply_markup=keyboard)
             except Exception:
-                pass
+                log.warning(
+                    "single_bot_reply_delivery_failed",
+                    session_id=session.session_id,
+                    target_user_id=uid,
+                )
 
 
 def _svc(bot: Bot, repo: SessionRepository) -> SessionService:
