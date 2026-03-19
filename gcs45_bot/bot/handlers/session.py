@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from typing import Optional
 
 from aiogram import Router, F, Bot
@@ -73,7 +74,7 @@ async def cmd_new_session(
 
     bot_info = await bot.get_me()
     invite_link = f"https://t.me/{bot_info.username}?start=join_{session.invite_code}"
-    inviter_name = event.from_user.first_name
+    inviter_name = html.escape(event.from_user.first_name or "Партнёр")
 
     await msg.answer("Перешли следующее сообщение партнёру 👇")
     await msg.answer(
@@ -180,12 +181,14 @@ async def _process_join(
         partner_name = chat_a.first_name or chat_a.username or "Партнёр"
     except Exception:
         partner_name = "Партнёр"
+    partner_name = html.escape(partner_name)
 
     try:
         chat_b = await bot.get_chat(user_id)
         joiner_name = chat_b.first_name or chat_b.username or "Партнёр"
     except Exception:
         joiner_name = "Партнёр"
+    joiner_name = html.escape(joiner_name)
 
     # Уведомить B
     await msg.answer(
@@ -533,7 +536,7 @@ async def cb_delete_data(
             pass
 
     # Показываем приветственное сообщение
-    name = callback.from_user.first_name or "друг"
+    name = html.escape(callback.from_user.first_name or "друг")
     await bot.send_message(
         chat_id,
         f"Привет, {name}!\n\n"

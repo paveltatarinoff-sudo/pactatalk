@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import structlog
 
@@ -29,10 +30,12 @@ async def cmd_my_data(message: Message, session_factory: async_sessionmaker) -> 
         return
 
     tx_count = len(txs)
+    first_name = html.escape(user.first_name or "—")
+    username = html.escape(user.username or "—")
     await message.answer(
         f"Данные о тебе в PactaTalk:\n\n"
-        f"Имя: {user.first_name}\n"
-        f"Username: @{user.username or '—'}\n"
+        f"Имя: {first_name}\n"
+        f"Username: @{username}\n"
         f"Telegram ID: <code>{user.telegram_id}</code>\n"
         f"Зарегистрирован: {user.created_at.strftime('%d.%m.%Y')}\n"
         f"Транзакций: {tx_count}\n\n"

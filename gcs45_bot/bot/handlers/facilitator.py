@@ -84,8 +84,10 @@ def _looks_like_address_feedback(message: str) -> bool:
 def _speaker_signature(session: SessionState) -> str:
     """Индикатор очерёдности в начале следующего сообщения — кого бот ждёт."""
     if session.waiting_for == "BOTH":
-        return f"\n\n<b>👥 {session.name_a} и {session.name_b}, теперь ваш ход →</b>"
-    name = session.name_a if session.waiting_for == "A" else session.name_b
+        name_a = html.escape(session.name_a)
+        name_b = html.escape(session.name_b)
+        return f"\n\n<b>👥 {name_a} и {name_b}, теперь ваш ход →</b>"
+    name = html.escape(session.name_a if session.waiting_for == "A" else session.name_b)
     return f"\n\n<b>👉 {name}, теперь твой ход →</b>"
 
 
@@ -289,7 +291,7 @@ async def _collect_for_both(
     # Проверяем не ответил ли уже этот партнёр
     already = session.pending_a_message if sender_label == "A" else session.pending_b_message
     if already:
-        await message.answer(f"Ты уже ответил(а). Жду ответа от {other_name}.")
+        await message.answer(f"Ты уже ответил(а). Жду ответа от {html.escape(other_name)}.")
         return
 
     # Сохраняем ответ

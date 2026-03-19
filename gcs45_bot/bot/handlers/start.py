@@ -1,3 +1,5 @@
+import html
+
 from aiogram import Router, Bot, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -37,7 +39,7 @@ async def cmd_start(
     session_factory: async_sessionmaker,
 ) -> None:
     user = message.from_user
-    name = (user.first_name or user.username or "друг") if user else "друг"
+    name = html.escape((user.first_name or user.username or "друг") if user else "друг")
 
     # Регистрируем пользователя
     async with session_factory() as db:

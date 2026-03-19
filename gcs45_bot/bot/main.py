@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 
 import structlog
@@ -72,10 +73,10 @@ async def timeout_watcher(bot: Bot, redis: Redis, session_factory: async_session
 
                 if current.waiting_for == "A":
                     target_ids = [current.user_a_id]
-                    reminder = f"{current.name_a or 'Партнёр A'}, я всё ещё жду твой ответ."
+                    reminder = f"{html.escape(current.name_a or 'Партнёр A')}, я всё ещё жду твой ответ."
                 elif current.waiting_for == "B":
                     target_ids = [current.user_b_id]
-                    reminder = f"{current.name_b or 'Партнёр B'}, я всё ещё жду твой ответ."
+                    reminder = f"{html.escape(current.name_b or 'Партнёр B')}, я всё ещё жду твой ответ."
                 else:
                     target_ids = [uid for uid in (current.user_a_id, current.user_b_id) if uid]
                     reminder = "Я всё ещё жду по одному ответу от каждого из вас, чтобы продолжить."
