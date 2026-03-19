@@ -10,7 +10,6 @@ class Settings(BaseSettings):
     admin_ids: list[int] = []
 
     # AI
-    anthropic_api_key: str = ""  # не используется, оставлено для совместимости
     openai_api_key: str = ""
 
     # Storage

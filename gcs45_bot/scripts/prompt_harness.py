@@ -47,10 +47,6 @@ def _build_session(raw: dict[str, Any], scenario_id: str) -> SessionState:
         name_b=session_data.get("name_b", "Lyuda"),
         waiting_for=session_data.get("waiting_for", "A"),
         dialogue_state=session_data.get("dialogue_state", "SETUP"),
-        goal_a=session_data.get("goal_a", ""),
-        goal_b=session_data.get("goal_b", ""),
-        goal_joint=session_data.get("goal_joint", ""),
-        topic_current=session_data.get("topic_current", ""),
         last_turn_summary=session_data.get("last_turn_summary", ""),
     )
 

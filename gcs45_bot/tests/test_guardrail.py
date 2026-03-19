@@ -13,7 +13,6 @@ def _session(waiting_for: str = "A", state: str = "DEEPEN") -> SessionState:
         session_id="test-session",
         user_a_id=1,
         user_b_id=2,
-        chat_id=100,
         name_a="Pasha",
         name_b="Lyuda",
         waiting_for=waiting_for,

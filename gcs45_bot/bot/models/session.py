@@ -12,19 +12,12 @@ class SessionState:
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     user_a_id: int = 0
     user_b_id: int = 0
-    chat_id: int = 0
 
     # Имена участников
     name_a: str = ""
     name_b: str = ""
 
-    # Цели сессии
-    goal_a: str = ""
-    goal_b: str = ""
-    goal_joint: str = ""
-
     # Текущий контекст
-    topic_current: str = ""
     speaker_turn: Literal["A", "B", "facilitator"] = "facilitator"
     resume_context: str = ""  # Resume brief from previous session (if any)
 
@@ -32,10 +25,6 @@ class SessionState:
     # SETUP | CLARIFY | DEESCALATE | DEEPEN | OPTIONS | AGREE | CHECK_IN
     dialogue_state: str = "SETUP"
     last_turn_summary: str = ""  # краткое резюме последнего хода для async context
-
-    # Заметки фасилитатора (метаданные, не цитаты)
-    notes_a: list[str] = field(default_factory=list)
-    notes_b: list[str] = field(default_factory=list)
 
     # Режим и фаза
     mode: Literal["structured", "free", "pause", "closing"] = "structured"
@@ -52,7 +41,6 @@ class SessionState:
 
     # Приватность
     ephemeral_mode: bool = True
-    summary_opt_in: bool = False
 
     # Invite code (для relay mode)
     invite_code: str = ""
