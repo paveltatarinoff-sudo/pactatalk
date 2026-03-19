@@ -115,6 +115,17 @@ Durable storage:
 
 Если задача связана с product analysis, research или post-mortem, надо учитывать именно `session_events`, а не только Redis history.
 
+### 8. Schema path
+
+Alembic теперь считается основным schema path.
+
+Нормальный local/dev flow:
+- `alembic upgrade head`
+- потом запуск приложения
+
+`Base.metadata.create_all(...)` больше не является baseline runtime bootstrap path.
+Флаг `ENABLE_DEV_SCHEMA_BOOTSTRAP` существует только как временный dev fallback и не должен использоваться в production.
+
 ## Основные файлы
 
 - `bot/services/claude_service.py`
