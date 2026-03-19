@@ -62,20 +62,31 @@ async def cb_confirm_delete(
     user_id = callback.from_user.id
 
     repo = SessionRepository(redis, session_factory)
-    wipe_summary = await repo.delete_all_user_session_data(user_id)
+    log.info("privacy_wipe_started", user_id=user_id)
 
-    # Удалить данные из PostgreSQL
-    async with session_factory() as db:
-        user_repo = UserRepository(db)
-        await user_repo.delete_user_data(user_id)
+    try:
+        wipe_summary = await repo.delete_all_user_session_data(user_id)
 
-    await state.clear()
-    log.info("privacy_full_wipe_completed", user_id=user_id, **wipe_summary)
-    await callback.message.answer(
-        "Все твои данные удалены. До свидания!\n\n"
-        "Если захочешь вернуться — просто напиши /start",
-    )
-    await callback.answer()
+        # Удалить данные из PostgreSQL
+        async with session_factory() as db:
+            user_repo = UserRepository(db)
+            await user_repo.delete_user_data(user_id)
+
+        await state.clear()
+        log.info("privacy_full_wipe_completed", user_id=user_id, **wipe_summary)
+        await callback.message.answer(
+            "Все твои данные удалены. До свидания!\n\n"
+            "Если захочешь вернуться — просто напиши /start",
+        )
+    except Exception:
+        log.error("privacy_wipe_failed", user_id=user_id, exc_info=True)
+        await callback.message.answer(
+            "При удалении данных произошла ошибка.\n"
+            "Часть данных могла уже быть удалена.\n"
+            "Попробуй выполнить команду ещё раз позже.",
+        )
+    finally:
+        await callback.answer()
 
 
 @router.callback_query(F.data == "privacy:cancel_delete")

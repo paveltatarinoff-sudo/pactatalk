@@ -264,3 +264,55 @@ def test_cb_confirm_delete_runs_full_wipe_and_user_delete(monkeypatch) -> None:
     assert state.cleared is True
     assert callback.answered is True
     assert callback.message.answers
+
+
+def test_cb_confirm_delete_reports_failure_and_answers_callback(monkeypatch) -> None:
+    called: dict[str, object] = {}
+
+    class RepoStub:
+        def __init__(self, redis, session_factory) -> None:
+            called["repo_init"] = session_factory
+
+        async def delete_all_user_session_data(self, user_id: int) -> dict[str, int]:
+            called["wipe_user_id"] = user_id
+            raise RuntimeError("wipe failed")
+
+    class UserRepoStub:
+        def __init__(self, db) -> None:
+            called["user_repo_init"] = True
+
+        async def delete_user_data(self, user_id: int) -> None:
+            called["user_delete_user_id"] = user_id
+
+    class DbSessionStub:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    class SessionFactoryStub:
+        def __call__(self):
+            return DbSessionStub()
+
+    monkeypatch.setattr(privacy, "SessionRepository", RepoStub)
+    monkeypatch.setattr(privacy, "UserRepository", UserRepoStub)
+
+    callback = CallbackStub(111)
+    state = StateStub()
+
+    asyncio.run(
+        privacy.cb_confirm_delete(
+            callback,
+            SessionFactoryStub(),
+            FakeRedis(),
+            state,
+        )
+    )
+
+    assert called["wipe_user_id"] == 111
+    assert "user_delete_user_id" not in called
+    assert state.cleared is False
+    assert callback.answered is True
+    assert callback.message.answers
+    assert "При удалении данных произошла ошибка" in callback.message.answers[-1]
