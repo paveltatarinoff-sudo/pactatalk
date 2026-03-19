@@ -7,6 +7,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from redis.asyncio import Redis
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, async_sessionmaker
 
 from bot.config import settings
@@ -56,6 +57,26 @@ async def maybe_bootstrap_schema(engine: AsyncEngine) -> None:
     await create_db(engine)
 
 
+async def health_check(redis: Redis, engine: AsyncEngine) -> tuple[bool, dict[str, str]]:
+    checks: dict[str, str] = {}
+
+    try:
+        await redis.ping()
+        checks["redis"] = "ok"
+    except Exception:
+        checks["redis"] = "error"
+
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        checks["postgres"] = "ok"
+    except Exception:
+        checks["postgres"] = "error"
+
+    healthy = all(status == "ok" for status in checks.values())
+    return healthy, checks
+
+
 async def timeout_watcher(bot: Bot, redis: Redis, session_factory: async_sessionmaker) -> None:
     repo = SessionRepository(redis, session_factory)
     svc = SessionService(repo, bot)
@@ -63,6 +84,7 @@ async def timeout_watcher(bot: Bot, redis: Redis, session_factory: async_session
     while True:
         try:
             sessions = await repo.list_active_sessions()
+            logger.info("timeout_watcher_heartbeat", active_session_count=len(sessions))
             for current in sessions:
                 if current.mode == "closing" or current.user_b_id == 0:
                     continue
@@ -145,7 +167,17 @@ async def main() -> None:
         from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
         from aiohttp import web
 
+        async def health_handler(_: web.Request) -> web.Response:
+            healthy, checks = await health_check(redis, engine)
+            status = 200 if healthy else 503
+            body = {
+                "status": "ok" if healthy else "unhealthy",
+                "checks": checks,
+            }
+            return web.json_response(body, status=status)
+
         app = web.Application()
+        app.router.add_get("/health", health_handler)
         webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=settings.webhook_secret)
         webhook_handler.register(app, path="/webhook")
         setup_application(app, dp, bot=bot)

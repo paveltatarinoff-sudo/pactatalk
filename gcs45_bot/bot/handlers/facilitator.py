@@ -102,6 +102,28 @@ def _reply_extras(session: SessionState) -> tuple[str, object]:
     return _speaker_signature(session), end_session_button()
 
 
+async def _notify_admins_about_risk(bot: Bot, session: SessionState) -> None:
+    if not settings.admin_ids:
+        return
+
+    text = (
+        "risk_flag_triggered\n"
+        f"session_id={session.session_id}\n"
+        f"user_a_id={session.user_a_id}\n"
+        f"user_b_id={session.user_b_id}\n"
+        f"details={session.risk_details[:200]}"
+    )
+    for admin_id in settings.admin_ids:
+        try:
+            await bot.send_message(admin_id, text)
+        except Exception:
+            log.warning(
+                "risk_flag_admin_notify_failed",
+                session_id=session.session_id,
+                admin_id=admin_id,
+            )
+
+
 # ─── Текстовые сообщения ──────────────────────────────────────────────────────
 
 @router.message(F.text)
@@ -372,6 +394,13 @@ async def _collect_for_both(
     if risk_detected:
         session.risk_flag = True
         session.risk_details = f"BOTH mode: {combined[:100]}"
+        log.warning(
+            "risk_flag_triggered",
+            session_id=session.session_id,
+            mode="both",
+            details=session.risk_details,
+        )
+        await _notify_admins_about_risk(bot, session)
         svc = _svc(bot, repo)
         await svc.end_session(session)
         await svc.notify_both(session, reply)
@@ -486,6 +515,13 @@ async def _process_turn(
     if risk_detected:
         session.risk_flag = True
         session.risk_details = f"Triggered by [{sender_name}]: {text[:100]}"
+        log.warning(
+            "risk_flag_triggered",
+            session_id=session.session_id,
+            mode="single",
+            details=session.risk_details,
+        )
+        await _notify_admins_about_risk(bot, session)
         svc = _svc(bot, repo)
         await svc.end_session(session)
         await svc.notify_both(session, reply)
