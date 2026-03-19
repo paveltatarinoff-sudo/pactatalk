@@ -263,6 +263,28 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
 6. Шаг выбран → next_state="AGREE".
 7. После договорённости → next_state="CHECK_IN".
 
+### МИКРОВМЕШАТЕЛЬСТВА (micro-interventions)
+
+Ты можешь использовать компактные фасилитаторские приёмы прямо в ответе.
+Это НЕ терапия. Это расширение твоего арсенала как фасилитатора.
+
+Правила:
+- Максимум ОДНА микротехника на один ход. Остальное — обычная фасилитация.
+- Скрытые MI: просто делай это в ответе. Не называй технику. Не объясняй.
+- Мягкие MI: предлагай как вопрос или приглашение.
+  Если пара не подхватила — НЕ повторяй ту же технику в ближайших ходах.
+- ЗАПРЕЩЕНО: называть технику по имени, говорить «давайте сделаем упражнение»,
+  превращать фасилитацию в мастер-класс, предлагать больше одной MI за ход.
+- MI — это НЕ решения и НЕ шаги на неделю. Это способы говорить прямо сейчас.
+
+Словарь:
+[скрытые] назвать чувство, назвать потребность, сузить до эпизода,
+  факт vs интерпретация, мост-проверка, от фактов к переживанию,
+  обвинение в уязвимость
+[мягкие] проверка понимания, сказать от себя, назвать знакомый круг
+
+Когда применять конкретные MI — см. инструкции для текущего состояния ниже.
+
 Текущее состояние и детальные инструкции — в developer context."""
 
 
@@ -283,11 +305,37 @@ STATE_GUIDELINES: dict[str, str] = {
         "Не переходи к OPTIONS, пока оба не понимают друг друга.\n"
         "HANDOFF: в CLARIFY addressed_to=BOTH допустим ТОЛЬКО для называния конфликта.\n"
         "Обычный ход: addressed_to = тот, чьи слова непонятны. Не другой.\n"
+        "\n"
+        "Микровмешательства для CLARIFY (выбери ОДНО, если подходит):\n"
+        "— [скрытое] Генерализация ('всегда', 'никогда') → сузь до эпизода:\n"
+        "  'Когда последний раз это произошло? Что конкретно случилось?'\n"
+        "— [скрытое] Приписывание мотивов ('он специально', 'ей всё равно') → раздели факт и историю:\n"
+        "  'Что именно произошло? А что ты решил(а), что это значит?'\n"
+        "— [скрытое] Один высказал потребность → мост-проверка:\n"
+        "  'Что ты слышишь в этих словах — упрёк или просьбу?'\n"
+        "— [скрытое] Спорят о деталях/хронологии → верни к переживанию:\n"
+        "  'Не так важно, когда именно. Что ты почувствовал(а) в тот момент?'\n"
+        "\n"
         "Когда понимание есть → OPTIONS или DEEPEN."
     ),
     "DEESCALATE": (
         "Функция: СНИЗИТЬ НАПРЯЖЕНИЕ. Одно действие на этот ход:\n"
         "Замедли разговор. Не обсуждай содержание — только снижай накал.\n"
+        "\n"
+        "Микровмешательства для DEESCALATE (выбери ОДНО, если подходит):\n"
+        "— [скрытое] Генерализация в горячке → сузь до эпизода:\n"
+        "  'Стоп. Не «всегда» — а вчера вечером. Что конкретно произошло?'\n"
+        "— [скрытое] Приписывание мотивов ('ты специально', 'тебе плевать') → раздели факт и историю:\n"
+        "  'Что произошло — и что ты решил(а), что это значит?'\n"
+        "— [мягкое] Прямое обвинение ('ты делаешь X') → мягко предложи сказать от себя:\n"
+        "  'А если сказать это не про него, а про себя — что ты чувствуешь, когда это происходит?'\n"
+        "  'Что внутри, когда он так делает? Скажи это от себя.'\n"
+        "  НЕ используй: 'попробуй я-высказывание', 'скажи от первого лица' — это звучит как инструкция.\n"
+        "— [скрытое] Спор о фактах в горячке → верни к переживанию:\n"
+        "  'Оставим «кто прав». Что каждый из вас чувствовал?'\n"
+        "— [скрытое] Атака с болью → переведи обвинение в уязвимость:\n"
+        "  'За этими словами слышится боль. Как будто тебе важно — и страшно.'\n"
+        "\n"
         "Когда оба спокойны → CLARIFY или DEEPEN."
     ),
     "DEEPEN": (
@@ -306,6 +354,29 @@ STATE_GUIDELINES: dict[str, str] = {
         "НЕ предлагай шаги, решения, действия, ритуалы, договорённости. Это не твоя задача сейчас.\n"
         "ЕСЛИ ТОЛЬКО ЧТО ВЕРНУЛСЯ ИЗ OPTIONS (отказ от шага) — НЕ возвращайся к OPTIONS\n"
         "в ближайшие 4 хода. Копай глубже в чувства.\n"
+        "\n"
+        "Микровмешательства для DEEPEN (выбери ОДНО, если подходит):\n"
+        "— [скрытое] Партнёр говорит размыто ('тяжело', 'плохо', 'бесит') → назови чувство:\n"
+        "  'Похоже, за этим — обида. Не столько злость, сколько боль от того, что...'\n"
+        "— [скрытое] Партнёр высказывает претензию → переведи в потребность:\n"
+        "  'Звучит так, будто тебе важно чувствовать, что тебя замечают'\n"
+        "— [скрытое] Генерализация ('всегда', 'никогда') → сузь до эпизода:\n"
+        "  'Вспомни последний раз — что именно произошло?'\n"
+        "— [скрытое] Один сказал уязвимое, второй не отреагировал → мост-проверка:\n"
+        "  'Он говорит, что ему страшно. Что ты слышишь — упрёк или просьбу?'\n"
+        "— [скрытое] Обвинение с болью за ним → переведи в уязвимость:\n"
+        "  'За словами «тебе плевать» слышится: «мне страшно, что я не нужна». Это ближе?'\n"
+        "— [мягкое] Один не слышит другого → мягко проверь понимание:\n"
+        "  'Что до тебя сейчас дошло из его/её слов?'\n"
+        "  'Как тебе это слышится?'\n"
+        "  'Если коротко — что ты понял(а) из того, что она сказала?'\n"
+        "  НЕ используй: 'попробуй пересказать', 'повтори своими словами' — это звучит как упражнение.\n"
+        "— [мягкое, ТОЛЬКО при предупреждении о повторах] Разговор буксует 3+ хода → мягко назови круг:\n"
+        "  'Кажется, вы снова заходите в один и тот же круг.'\n"
+        "  'Как будто происходит одно и то же: ... Вам это знакомо?'\n"
+        "  'Похоже, разговор опять идёт по знакомой дуге.'\n"
+        "  НЕ используй: 'замечаю цикл', 'паттерн', 'повторяющийся' — это звучит как терапия.\n"
+        "\n"
         "HANDOFF: в DEEPEN addressed_to=BOTH ЗАПРЕЩЁН. Адресуй тому, кого углубляешь.\n"
         "Переключение на второго — НУЖНО и ВАЖНО, когда текущий дал ясный ответ:\n"
         "подтверждение, короткий ответ, «да/нет», или назвал свою потребность.\n"
@@ -572,6 +643,14 @@ class ClaudeService:
                     f"  Если был ШАГНУТЬ → вернись к ВЫРАЗИТЬ или ПРОЯСНИТЬ.\n"
                     f"  Если были шаблонные фразы → перефразируй полностью.\n"
                 )
+            # Soft MI cooldown: don't repeat the same soft technique
+            soft_mi_used = rep_info.get("recent_soft_mi", [])
+            if soft_mi_used:
+                mi_list = ", ".join(f"«{m}»" for m in soft_mi_used[:3])
+                repetition_warning += (
+                    f"⚠ MI COOLDOWN: ты недавно уже применял мягкую микротехнику ({mi_list}).\n"
+                    f"  НЕ предлагай ту же технику снова. Используй скрытые MI или обычную фасилитацию.\n"
+                )
             # Characterize last user answer for natural switch guidance
             last_turns = self._recent_user_turns(messages, limit=1)
             if last_turns:
@@ -581,9 +660,10 @@ class ClaudeService:
                 other_label = "B" if last_speaker_label == "A" else "A"
                 word_count = len(last_text.split())
                 is_vulnerable = self._last_user_message_is_vulnerable(messages)
+                can_natural_switch = self._should_natural_switch_short_answer(messages, effective_state)
                 if is_vulnerable:
                     last_answer_hint = f"Последний ответ {last_name}: уязвимый/эмоциональный ({word_count} слов) → побудь с ним.\n"
-                elif word_count <= 8 and not is_both_state:
+                elif word_count <= 8 and not is_both_state and can_natural_switch:
                     last_answer_hint = (
                         f"Последний ответ {last_name}: короткий/ясный ({word_count} слов).\n"
                         f"→ ПЕРЕКЛЮЧИ на {other_name}. addressed_to=\"{other_label}\", next_speaker=\"{other_label}\".\n"
@@ -714,8 +794,19 @@ class ClaudeService:
             "не люб", "предал", "обидно", "стыдно", "виноват",
             "боюсь", "теряю", "потеря", "пустота", "безнадежн",
             "не знаю как жить", "не вижу смысл",
+            "тяжело", "неприятно", "плохо", "бесит", "достало",
+            "надоело", "никогда меня не", "всегда ты",
         )
         return cls._contains_any(text, vulnerability_markers)
+
+    @classmethod
+    def _should_natural_switch_short_answer(cls, messages: list[dict], effective_state: str) -> bool:
+        """Avoid switching too early in DEEPEN after the first short reply."""
+        if effective_state != "DEEPEN":
+            return True
+        consec_count, consec_speaker = cls._consecutive_same_speaker(messages)
+        last_speaker = cls._last_user_speaker(messages)
+        return consec_count >= 2 and consec_speaker in ("A", "B") and consec_speaker == last_speaker
 
     @staticmethod
     def _normalize_text(value: str) -> str:
@@ -795,6 +886,29 @@ class ClaudeService:
         "что ты слышишь в", "как это для тебя",
     )
 
+    # Soft MI markers for cooldown detection (MI-5, MI-7, MI-8)
+    _SOFT_MI_MARKERS_SHORT: tuple[str, ...] = (
+        # MI-5: отражение / пересказ (cooldown 4 хода) — softened wording
+        "что до тебя дошло", "как тебе это слышится",
+        "что ты понял из", "что ты поняла из",
+        "что ты услышал", "что ты услышала",
+        # old markers (still catch instructional phrasing if GPT slips)
+        "попробуй пересказать", "повтори своими словами",
+        # MI-7: я-высказывание (cooldown 4 хода) — softened wording
+        "скажи это от себя", "что ты чувствуешь когда",
+        "что внутри когда", "сказать не про него а про себя",
+        # old markers
+        "от первого лица", "я чувствую когда",
+    )
+    _SOFT_MI_MARKERS_LONG: tuple[str, ...] = (
+        # MI-8: назвать цикл (cooldown 6 ходов) — softened wording
+        "один и тот же круг", "по знакомой дуге",
+        "происходит одно и то же", "вам это знакомо",
+        "снова заходите", "опять идет по",
+        # old markers
+        "замечаю цикл", "по кругу",
+    )
+
     @classmethod
     def _detect_bot_repetition(cls, messages: list[dict]) -> dict[str, bool | list[str]]:
         """Scan recent bot messages for repeated intervention patterns.
@@ -802,37 +916,71 @@ class ClaudeService:
         Returns dict with:
           repeated_interventions: bool
           repeated_phrases: bool
+          repeated_soft_mi: bool
           recent_patterns: list of matched patterns (for prompt injection)
         """
         recent_bot_texts: list[str] = []
+        recent_bot_texts_long: list[str] = []
         for item in reversed(messages):
             if item.get("role") == "assistant":
-                recent_bot_texts.append(item.get("content", ""))
-                if len(recent_bot_texts) >= 4:
+                text = item.get("content", "")
+                if len(recent_bot_texts) < 4:
+                    recent_bot_texts.append(text)
+                if len(recent_bot_texts_long) < 6:
+                    recent_bot_texts_long.append(text)
+                if len(recent_bot_texts_long) >= 6:
                     break
 
-        if len(recent_bot_texts) < 2:
-            return {"repeated_interventions": False, "repeated_phrases": False, "recent_patterns": []}
+        if not recent_bot_texts:
+            return {
+                "repeated_interventions": False,
+                "repeated_phrases": False,
+                "repeated_soft_mi": False,
+                "recent_patterns": [],
+                "recent_soft_mi": [],
+            }
 
-        # Check for repeated intervention types
+        need_canned_check = len(recent_bot_texts) >= 2
+
+        # Check for repeated intervention types (need ≥2 messages to compare)
         intervention_counts: dict[str, int] = {}
-        for text in recent_bot_texts:
-            normalized = cls._normalize_text(text)
-            for marker in cls._CANNED_INTERVENTION_MARKERS:
-                if marker in normalized:
-                    intervention_counts[marker] = intervention_counts.get(marker, 0) + 1
-
-        repeated_interventions = any(count >= 2 for count in intervention_counts.values())
-
-        # Check for repeated canned phrases
         phrase_counts: dict[str, int] = {}
+        repeated_interventions = False
+        repeated_phrases = False
+        if need_canned_check:
+            for text in recent_bot_texts:
+                normalized = cls._normalize_text(text)
+                for marker in cls._CANNED_INTERVENTION_MARKERS:
+                    if marker in normalized:
+                        intervention_counts[marker] = intervention_counts.get(marker, 0) + 1
+
+            repeated_interventions = any(count >= 2 for count in intervention_counts.values())
+
+            # Check for repeated canned phrases
+            for text in recent_bot_texts:
+                normalized = cls._normalize_text(text)
+                for marker in cls._CANNED_PHRASING_MARKERS:
+                    if marker in normalized:
+                        phrase_counts[marker] = phrase_counts.get(marker, 0) + 1
+
+            repeated_phrases = any(count >= 2 for count in phrase_counts.values())
+
+        # Check for repeated soft MI (cooldown: MI-5/MI-7 in 4, MI-8 in 6)
+        soft_mi_found: list[str] = []
         for text in recent_bot_texts:
             normalized = cls._normalize_text(text)
-            for marker in cls._CANNED_PHRASING_MARKERS:
+            for marker in cls._SOFT_MI_MARKERS_SHORT:
                 if marker in normalized:
-                    phrase_counts[marker] = phrase_counts.get(marker, 0) + 1
+                    soft_mi_found.append(marker)
+                    break  # one marker per message is enough
+        for text in recent_bot_texts_long:
+            normalized = cls._normalize_text(text)
+            for marker in cls._SOFT_MI_MARKERS_LONG:
+                if marker in normalized:
+                    soft_mi_found.append(marker)
+                    break
 
-        repeated_phrases = any(count >= 2 for count in phrase_counts.values())
+        repeated_soft_mi = len(soft_mi_found) >= 1  # any recent use → cooldown active
 
         recent_patterns: list[str] = []
         for marker, count in intervention_counts.items():
@@ -845,7 +993,9 @@ class ClaudeService:
         return {
             "repeated_interventions": repeated_interventions,
             "repeated_phrases": repeated_phrases,
+            "repeated_soft_mi": repeated_soft_mi,
             "recent_patterns": recent_patterns,
+            "recent_soft_mi": soft_mi_found,
         }
 
     _ACTION_REJECTION_MARKERS: tuple[str, ...] = (
@@ -1173,6 +1323,7 @@ class ClaudeService:
                         and sw_consec >= 2
                         and sw_consec_speaker in ("A", "B")
                         and next_speaker == sw_consec_speaker
+                        and self._should_natural_switch_short_answer(messages, effective_state)
                         and not self._last_user_message_is_vulnerable(messages)):
                     other = "B" if sw_consec_speaker == "A" else "A"
                     log.info(
