@@ -244,10 +244,25 @@ async def cb_join_confirm(
 
     # Load resume from previous session (P3.1)
     try:
-        resume_ctx = await repo.get_pair_resume(session.user_a_id, session.user_b_id)
-        if resume_ctx:
-            session.resume_context = resume_ctx
-            log.info("pair_resume_loaded", session_id=session.session_id)
+        pair_resume = await repo.get_pair_resume(session.user_a_id, session.user_b_id)
+        if pair_resume:
+            # Validate names to prevent cross-pair contamination
+            stored_names = {pair_resume.name_a.lower().strip(), pair_resume.name_b.lower().strip()} - {""}
+            current_names = {(session.name_a or "").lower().strip(), (session.name_b or "").lower().strip()} - {""}
+            if stored_names and current_names and not stored_names & current_names:
+                log.warning(
+                    "pair_resume_name_mismatch",
+                    session_id=session.session_id,
+                    stored_names=list(stored_names),
+                    current_names=list(current_names),
+                )
+            else:
+                session.resume_context = pair_resume.resume_context
+                log.info(
+                    "pair_resume_loaded",
+                    session_id=session.session_id,
+                    stored_names=[pair_resume.name_a, pair_resume.name_b],
+                )
     except Exception:
         log.exception("pair_resume_load_failed", session_id=session.session_id)
 

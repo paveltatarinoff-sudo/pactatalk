@@ -255,8 +255,8 @@ class SessionRepository:
                 existing.updated_at = datetime.utcnow()
             await db.commit()
 
-    async def get_pair_resume(self, user_a_id: int, user_b_id: int) -> Optional[str]:
-        """Load the resume context for a pair. Returns None if not found."""
+    async def get_pair_resume(self, user_a_id: int, user_b_id: int) -> Optional[PairResume]:
+        """Load the PairResume for a pair. Returns None if not found."""
         if self._session_factory is None:
             return None
         if not user_a_id or not user_b_id:
@@ -267,7 +267,7 @@ class SessionRepository:
             resume = await db.get(PairResume, pair_key)
             if resume is None:
                 return None
-            return resume.resume_context
+            return resume
 
     async def delete_pair_resume(self, user_a_id: int, user_b_id: int) -> None:
         """Delete the resume context for a pair."""
