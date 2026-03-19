@@ -11,6 +11,7 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import async_sessionmaker
 import structlog
 
+from bot.config import settings
 from bot.fsm.states import SessionFlow
 from bot.models.session import SessionState
 from bot.repositories.session_repo import SessionRepository
