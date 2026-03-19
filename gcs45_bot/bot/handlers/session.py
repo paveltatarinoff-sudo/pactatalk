@@ -23,6 +23,7 @@ from bot.utils.keyboards import (
     join_confirm_keyboard,
     main_menu_keyboard,
     end_session_button,
+    resume_confirmation_keyboard,
 )
 
 router = Router(name="session")
@@ -31,6 +32,51 @@ log = structlog.get_logger()
 
 def _make_service(bot: Bot, redis: Redis, session_factory: Optional[async_sessionmaker] = None) -> SessionService:
     return SessionService(SessionRepository(redis, session_factory), bot)
+
+
+def _regular_setup_intro() -> str:
+    return (
+        f"Давайте начнём. Я здесь, чтобы помочь вам услышать друг друга.\n\n"
+        f"Как это работает:\n"
+        f"• Пишешь сообщение или голосовое 🎤 — фасилитатор отвечает вам обоим\n"
+        f"• Говорит один, второй слушает — я слежу за очерёдностью\n"
+        f"• Завершить сессию можно в любой момент кнопкой ниже\n\n"
+        f"<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+        f"Напишите каждый своё: <b>что ты хочешь получить от этого разговора?</b>\n"
+        f"Отвечайте независимо — я жду ответа от вас обоих."
+    )
+
+
+def _resume_confirmation_intro(session: SessionState) -> str:
+    safe_resume = html.escape(session.resume_context)
+    return (
+        f"С возвращением! Я помню ваш прошлый разговор.\n\n"
+        f"Вот как я его запомнил:\n\n"
+        f"<blockquote>{safe_resume}</blockquote>\n\n"
+        f"Если это похоже на ваш прошлый разговор, можно продолжить с этого места. "
+        f"Если нет — начнём заново."
+    )
+
+
+def _apply_resume_choice(session: SessionState, choice: str) -> str:
+    if choice == "continue":
+        return (
+            "Продолжим с этого места.\n\n"
+            "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+            "Напишите каждый: <b>хотите продолжить прошлую тему или начать новую?</b>\n"
+            "Отвечайте независимо — я жду ответа от вас обоих."
+        )
+
+    session.resume_context = ""
+    if choice == "not_accurate":
+        return (
+            "Понял, значит начнём заново.\n\n"
+            "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+            "Напишите каждый своё: <b>что ты хочешь получить от этого разговора?</b>\n"
+            "Отвечайте независимо — я жду ответа от вас обоих."
+        )
+
+    return _regular_setup_intro()
 
 
 # ─── /new_session ────────────────────────────────────────────────────────────
@@ -284,34 +330,47 @@ async def cb_join_confirm(
         pass  # некритично — facilitator работает без FSM-фильтра
 
     if session.resume_context:
-        common_intro = (
-            f"С возвращением! Я помню наш прошлый разговор.\n\n"
-            f"Как это работает:\n"
-            f"• Пишешь сообщение или голосовое 🎤 — фасилитатор отвечает вам обоим\n"
-            f"• Говорит один, второй слушает — я слежу за очерёдностью\n"
-            f"• Завершить сессию можно в любой момент кнопкой ниже\n\n"
-            f"<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
-            f"Напишите каждый: <b>хотите продолжить прошлую тему или начать новую?</b>\n"
-            f"Отвечайте независимо — я жду ответа от вас обоих."
-        )
+        common_intro = _resume_confirmation_intro(session)
+        reply_markup = resume_confirmation_keyboard()
     else:
-        common_intro = (
-            f"Давайте начнём. Я здесь, чтобы помочь вам услышать друг друга.\n\n"
-            f"Как это работает:\n"
-            f"• Пишешь сообщение или голосовое 🎤 — фасилитатор отвечает вам обоим\n"
-            f"• Говорит один, второй слушает — я слежу за очерёдностью\n"
-            f"• Завершить сессию можно в любой момент кнопкой ниже\n\n"
-            f"<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
-            f"Напишите каждый своё: <b>что ты хочешь получить от этого разговора?</b>\n"
-            f"Отвечайте независимо — я жду ответа от вас обоих."
-        )
-    m_a = await bot.send_message(session.user_a_id, common_intro, reply_markup=end_session_button())
-    m_b = await bot.send_message(session.user_b_id, common_intro, reply_markup=end_session_button())
+        common_intro = _regular_setup_intro()
+        reply_markup = end_session_button()
+
+    m_a = await bot.send_message(session.user_a_id, common_intro, reply_markup=reply_markup)
+    m_b = await bot.send_message(session.user_b_id, common_intro, reply_markup=reply_markup)
     session.first_msg_id_a = m_a.message_id
     session.first_msg_id_b = m_b.message_id
     await repo.save(session)
     log.info("session_started", session_id=session.session_id, user_a_id=session.user_a_id, user_b_id=session.user_b_id)
 
+    await callback.answer()
+
+
+@router.callback_query(F.data.in_({"session:resume_continue", "session:resume_new_topic", "session:resume_not_accurate"}))
+async def cb_resume_choice(
+    callback: CallbackQuery,
+    bot: Bot,
+    redis: Redis,
+    session_factory: async_sessionmaker,
+) -> None:
+    repo = SessionRepository(redis, session_factory)
+    session = await repo.get_by_user(callback.from_user.id)
+    if session is None:
+        await callback.answer("Сессия не найдена.", show_alert=True)
+        return
+
+    if callback.data == "session:resume_continue":
+        choice = "continue"
+    elif callback.data == "session:resume_not_accurate":
+        choice = "not_accurate"
+    else:
+        choice = "new_topic"
+
+    followup = _apply_resume_choice(session, choice)
+    await repo.save(session)
+
+    svc = _make_service(bot, redis, session_factory)
+    await svc.notify_both(session, followup, reply_markup=end_session_button())
     await callback.answer()
 
 

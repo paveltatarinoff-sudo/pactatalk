@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from bot.models.session import SessionState
 from bot.models.pair_resume import PairResume, make_pair_key
+from bot.handlers.session import _apply_resume_choice
 from bot.services.claude_service import ClaudeService, STATE_GUIDELINES, STATE_GUIDELINES_RESUME
 
 
@@ -215,3 +216,26 @@ class TestResumeGuidelinesP33:
         idx_technique = STATE_GUIDELINES_RESUME.find("АКТИВНАЯ ТЕХНИКА")
         idx_new_topic = STATE_GUIDELINES_RESUME.find("новую тему")
         assert idx_technique < idx_new_topic, "Technique offer should come before new topic option"
+
+
+class TestResumeConfirmationChoice:
+    def test_continue_keeps_resume(self) -> None:
+        session = _session(state="SETUP", resume_context=SAMPLE_RESUME)
+        message = _apply_resume_choice(session, "continue")
+
+        assert session.resume_context == SAMPLE_RESUME
+        assert "Продолжим с этого места" in message
+
+    def test_new_topic_clears_resume(self) -> None:
+        session = _session(state="SETUP", resume_context=SAMPLE_RESUME)
+        message = _apply_resume_choice(session, "new_topic")
+
+        assert session.resume_context == ""
+        assert "что ты хочешь получить от этого разговора" in message
+
+    def test_not_accurate_clears_resume(self) -> None:
+        session = _session(state="SETUP", resume_context=SAMPLE_RESUME)
+        message = _apply_resume_choice(session, "not_accurate")
+
+        assert session.resume_context == ""
+        assert "начнём заново" in message

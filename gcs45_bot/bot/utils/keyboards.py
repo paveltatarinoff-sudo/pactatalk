@@ -46,3 +46,11 @@ def join_confirm_keyboard(code: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Присоединиться", callback_data=f"join:confirm:{code}")],
         [InlineKeyboardButton(text="Отклонить", callback_data="join:decline")],
     ])
+
+
+def resume_confirmation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Продолжить", callback_data="session:resume_continue")],
+        [InlineKeyboardButton(text="Новая тема", callback_data="session:resume_new_topic")],
+        [InlineKeyboardButton(text="Не совсем верно", callback_data="session:resume_not_accurate")],
+    ])
