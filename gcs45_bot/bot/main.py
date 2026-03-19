@@ -43,6 +43,17 @@ async def create_db(engine: AsyncEngine) -> None:
         await conn.run_sync(Base.metadata.create_all)
 
 
+async def maybe_bootstrap_schema(engine: AsyncEngine) -> None:
+    if not settings.enable_dev_schema_bootstrap:
+        return
+    if settings.is_production:
+        logger.warning("dev_schema_bootstrap_ignored_in_production")
+        return
+
+    logger.warning("dev_schema_bootstrap_enabled_using_create_all")
+    await create_db(engine)
+
+
 async def timeout_watcher(bot: Bot, redis: Redis, session_factory: async_sessionmaker) -> None:
     repo = SessionRepository(redis, session_factory)
     svc = SessionService(repo, bot)
@@ -100,7 +111,7 @@ async def main() -> None:
     engine = create_async_engine(db_url, echo=not settings.is_production, **db_kwargs)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
-    await create_db(engine)
+    await maybe_bootstrap_schema(engine)
 
     bot = Bot(
         token=settings.bot_token,
