@@ -86,7 +86,7 @@ class TestResumeInDeveloperPrompt:
         prompt = svc._developer_prompt_for_state(session, "SETUP")
         assert "КОНТЕКСТ ПРЕДЫДУЩЕЙ СЕССИИ" in prompt
         assert "Нехватка внимания" in prompt
-        assert "Хотите продолжить" in prompt
+        assert "Активная техника" in prompt
 
     def test_resume_not_injected_in_deepen(self) -> None:
         session = _session(state="DEEPEN", waiting_for="A", resume_context=SAMPLE_RESUME)
@@ -136,3 +136,82 @@ class TestResumeGuidelines:
 
     def test_resume_guidelines_not_copy_paste(self) -> None:
         assert "НЕ пересказывай resume дословно" in STATE_GUIDELINES_RESUME
+
+
+# ── P3.3: Stopping point + active technique continuity ───────────────────────
+
+
+SAMPLE_RESUME_WITH_TECHNIQUE = (
+    "Тема: Нехватка внимания и близости.\n"
+    "Позиция Pasha: ему важно чувствовать, что его ценят и замечают.\n"
+    "Позиция Lyuda: ей нужно больше совместного времени.\n"
+    "Где остановились: Pasha пересказывал слова Lyuda в рамках упражнения.\n"
+    "Активная техника: активное слушание — Pasha начал пересказ, но не завершил.\n"
+    "Что осталось недосказанным: Lyuda не дала обратную связь на пересказ.\n"
+    "Состояние: DEEPEN"
+)
+
+SAMPLE_RESUME_NO_TECHNIQUE = (
+    "Тема: Распределение домашних обязанностей.\n"
+    "Позиция Pasha: хочет больше равенства.\n"
+    "Позиция Lyuda: чувствует, что её вклад не замечают.\n"
+    "Где остановились: обсуждали конкретную ситуацию — ужин в среду.\n"
+    "Активная техника: нет\n"
+    "Что осталось недосказанным: Pasha не успел рассказать про свои ожидания.\n"
+    "Состояние: DEEPEN"
+)
+
+
+class TestResumeStoppingPoint:
+    """P3.3: resume_block and guidelines reference technique and stopping point."""
+
+    def test_resume_block_mentions_technique_field(self) -> None:
+        session = _session(state="SETUP", resume_context=SAMPLE_RESUME_WITH_TECHNIQUE)
+        svc = ClaudeService()
+        prompt = svc._developer_prompt_for_state(session, "SETUP")
+        assert "Активная техника" in prompt
+        assert "активное слушание" in prompt
+
+    def test_resume_block_mentions_stopping_point(self) -> None:
+        session = _session(state="SETUP", resume_context=SAMPLE_RESUME_WITH_TECHNIQUE)
+        svc = ClaudeService()
+        prompt = svc._developer_prompt_for_state(session, "SETUP")
+        assert "Где остановились" in prompt or "точку остановки" in prompt
+
+    def test_resume_block_hint_references_technique(self) -> None:
+        """The resume_block hint should tell the bot to look at technique field."""
+        session = _session(state="SETUP", resume_context=SAMPLE_RESUME_WITH_TECHNIQUE)
+        svc = ClaudeService()
+        prompt = svc._developer_prompt_for_state(session, "SETUP")
+        assert "предложи продолжить именно её" in prompt or "предложить продолжить" in prompt
+
+    def test_no_technique_resume_still_works(self) -> None:
+        session = _session(state="SETUP", resume_context=SAMPLE_RESUME_NO_TECHNIQUE)
+        svc = ClaudeService()
+        prompt = svc._developer_prompt_for_state(session, "SETUP")
+        assert "КОНТЕКСТ ПРЕДЫДУЩЕЙ СЕССИИ" in prompt
+        assert "нет" in prompt  # "Активная техника: нет" is in the resume
+
+    def test_resume_without_technique_field_still_injects(self) -> None:
+        """Old-format resumes (without technique field) should still be injected."""
+        session = _session(state="SETUP", resume_context=SAMPLE_RESUME)
+        svc = ClaudeService()
+        prompt = svc._developer_prompt_for_state(session, "SETUP")
+        assert "КОНТЕКСТ ПРЕДЫДУЩЕЙ СЕССИИ" in prompt
+        assert "вечер вторника" in prompt
+
+
+class TestResumeGuidelinesP33:
+    """P3.3: STATE_GUIDELINES_RESUME mentions technique continuity."""
+
+    def test_guidelines_mention_technique_priority(self) -> None:
+        assert "АКТИВНАЯ ТЕХНИКА" in STATE_GUIDELINES_RESUME
+
+    def test_guidelines_mention_stopping_point(self) -> None:
+        assert "ТОЧКА ОСТАНОВКИ" in STATE_GUIDELINES_RESUME or "Где остановились" in STATE_GUIDELINES_RESUME
+
+    def test_guidelines_technique_before_topic(self) -> None:
+        """Technique should be offered before general topic question."""
+        idx_technique = STATE_GUIDELINES_RESUME.find("АКТИВНАЯ ТЕХНИКА")
+        idx_new_topic = STATE_GUIDELINES_RESUME.find("новую тему")
+        assert idx_technique < idx_new_topic, "Technique offer should come before new topic option"
