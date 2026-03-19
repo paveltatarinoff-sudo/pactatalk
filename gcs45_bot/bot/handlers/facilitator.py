@@ -22,6 +22,7 @@ from bot.utils.keyboards import post_session_keyboard, end_session_keyboard, end
 
 router = Router(name="facilitator")
 log = structlog.get_logger()
+MESSAGE_THROTTLE_TTL_SECONDS = 5
 
 # Защита от одновременных запросов к Claude для одной сессии
 _locks: dict[str, asyncio.Lock] = {}
@@ -46,6 +47,17 @@ def _get_lock(session_id: str) -> asyncio.Lock:
 def _release_lock(session_id: str) -> None:
     """Освобождаем память при завершении сессии."""
     _locks.pop(session_id, None)
+
+
+async def _acquire_message_throttle(redis, user_id: int) -> bool:
+    return bool(
+        await redis.set(
+            f"throttle:{user_id}",
+            "1",
+            nx=True,
+            ex=MESSAGE_THROTTLE_TTL_SECONDS,
+        )
+    )
 
 
 def _apply_next_speaker(session: SessionState, next_speaker: str) -> None:
@@ -165,6 +177,12 @@ async def handle_session_message(
         await message.answer("Я вижу, тебе есть что сказать. Дождёмся ответа партнёра — скоро будет твоя очередь.")
         return
 
+    throttle_ok = await _acquire_message_throttle(redis, user_id)
+    if not throttle_ok:
+        bound_log.info("message_throttled", input_type="text")
+        await message.answer("Нужно немного подождать перед следующим сообщением.")
+        return
+
     lock = _get_lock(session.session_id)
     if lock.locked():
         bound_log.info("turn_rejected_lock_busy")
@@ -231,6 +249,12 @@ async def handle_voice_message(
     if not session.is_active_speaker(user_id):
         bound_log.info("voice_rejected_not_active_speaker", waiting_for=session.waiting_for)
         await message.answer("Я вижу, тебе есть что сказать. Дождёмся ответа партнёра — скоро будет твоя очередь.")
+        return
+
+    throttle_ok = await _acquire_message_throttle(redis, user_id)
+    if not throttle_ok:
+        bound_log.info("message_throttled", input_type="voice")
+        await message.answer("Нужно немного подождать перед следующим сообщением.")
         return
 
     lock = _get_lock(session.session_id)

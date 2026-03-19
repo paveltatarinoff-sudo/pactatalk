@@ -68,6 +68,17 @@ class _MessageStub:
         self.answers.append(text)
 
 
+class _RedisSetStub:
+    def __init__(self) -> None:
+        self._taken: set[str] = set()
+
+    async def set(self, key: str, value: str, nx: bool = False, ex: int | None = None):
+        if nx and key in self._taken:
+            return False
+        self._taken.add(key)
+        return True
+
+
 def test_handoff_coherence_blocks_override_when_text_starts_with_original_addressee() -> None:
     session = _session()
     resolved, reason = ClaudeService._apply_handoff_coherence_check(
@@ -230,3 +241,13 @@ def test_add_message_truncates_history_content_to_max_length() -> None:
 
     assert len(repo.history) == 1
     assert len(repo.history[0]["content"]) == 2000
+
+
+def test_acquire_message_throttle_blocks_second_attempt() -> None:
+    redis = _RedisSetStub()
+
+    first = asyncio.run(facilitator._acquire_message_throttle(redis, 1))
+    second = asyncio.run(facilitator._acquire_message_throttle(redis, 1))
+
+    assert first is True
+    assert second is False
