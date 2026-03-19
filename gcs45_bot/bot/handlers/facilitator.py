@@ -14,7 +14,7 @@ import structlog
 from bot.fsm.states import SessionFlow
 from bot.models.session import SessionState
 from bot.repositories.session_repo import SessionRepository
-from bot.services.claude_service import OpenAIServiceError
+from bot.services.claude_service import MAX_MESSAGE_LENGTH, OpenAIServiceError
 from bot.services.session_service import SessionService
 from bot.services.shared import claude as _claude
 from bot.utils.keyboards import post_session_keyboard, end_session_keyboard, end_session_button, main_menu_keyboard
@@ -131,6 +131,11 @@ async def handle_session_message(
     if message.text and message.text.strip().lower() == "закончить сессию":
         await message.answer("Вы хотите завершить сессию?", reply_markup=end_session_keyboard())
         return
+    if message.text and len(message.text) > MAX_MESSAGE_LENGTH:
+        await message.answer(
+            "Сообщение получилось слишком длинным. Лучше выделить главное и отправить короче."
+        )
+        return
 
     if not session.is_active_speaker(user_id):
         bound_log.info("turn_rejected_not_active_speaker", waiting_for=session.waiting_for)
@@ -233,6 +238,12 @@ async def handle_voice_message(
 
         if not text:
             await message.answer("Голосовое пустое или неразборчивое. Попробуй ещё раз.")
+            return
+        if len(text) > MAX_MESSAGE_LENGTH:
+            await message.answer(
+                "Голосовое получилось слишком длинным после распознавания. "
+                "Лучше разбить мысль на несколько коротких сообщений."
+            )
             return
 
         safe_text = html.escape(text)

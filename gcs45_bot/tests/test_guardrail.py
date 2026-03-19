@@ -213,3 +213,20 @@ def test_process_turn_uses_service_handoff_as_pass_through(monkeypatch) -> None:
 
     assert session.waiting_for == "B"
     assert repo.events[-1]["next_speaker"] == "B"
+
+
+def test_add_message_truncates_history_content_to_max_length() -> None:
+    repo = _HistoryRepo()
+    service = ClaudeService()
+
+    asyncio.run(
+        service._add_message(
+            session_id="test-session",
+            role="user",
+            content="x" * 2500,
+            repo=repo,
+        )
+    )
+
+    assert len(repo.history) == 1
+    assert len(repo.history[0]["content"]) == 2000

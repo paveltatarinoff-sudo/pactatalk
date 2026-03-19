@@ -20,6 +20,7 @@ from bot.config import settings
 from bot.models.session import SessionState
 
 log = structlog.get_logger()
+MAX_MESSAGE_LENGTH = 2000
 
 SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар в Telegram-боте PactaTalk.
 Ты помогаешь двум партнёрам разговаривать так, чтобы разговор был полезным.
@@ -1171,7 +1172,7 @@ class ClaudeService:
 
     async def _add_message(self, session_id: str, role: str, content: str, repo) -> None:
         history = await repo.get_history(session_id)
-        history.append({"role": role, "content": content})
+        history.append({"role": role, "content": content[:MAX_MESSAGE_LENGTH]})
         if len(history) > MAX_CONTEXT_MESSAGES:
             history = history[-MAX_CONTEXT_MESSAGES:]
         await repo.save_history(session_id, history)
