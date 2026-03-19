@@ -669,7 +669,7 @@ async def cb_save_summary(callback: CallbackQuery, redis: Redis, session_factory
         return
 
     summary = raw.decode() if isinstance(raw, bytes) else raw
-    await callback.message.answer(f"📋 <b>Резюме сессии</b>\n\n{summary}")
+    await callback.message.answer(f"📋 <b>Резюме сессии</b>\n\n{html.escape(summary)}")
     # Удаляем после отправки — данные одноразовые
     await redis.delete(f"summary:{user_id}")
     await callback.answer()

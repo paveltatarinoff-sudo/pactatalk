@@ -428,7 +428,7 @@ async def _collect_for_both(
         await _notify_admins_about_risk(bot, session)
         svc = _svc(bot, repo)
         await svc.end_session(session)
-        await svc.notify_both(session, reply)
+        await svc.notify_both(session, html.escape(reply))
         await svc.notify_both(
             session,
             "Сессия остановлена. Если кому-то сейчас небезопасно:\n"
@@ -549,7 +549,7 @@ async def _process_turn(
         await _notify_admins_about_risk(bot, session)
         svc = _svc(bot, repo)
         await svc.end_session(session)
-        await svc.notify_both(session, reply)
+        await svc.notify_both(session, html.escape(reply))
         await svc.notify_both(
             session,
             "Сессия остановлена. Если кому-то сейчас небезопасно:\n"
