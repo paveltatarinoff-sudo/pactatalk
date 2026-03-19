@@ -18,6 +18,7 @@ from bot.models.session_event import SessionEvent  # noqa: F401
 from bot.models.pair_resume import PairResume  # noqa: F401
 
 logger = structlog.get_logger()
+MAX_TIMEOUT_REMINDERS = 3
 
 
 def setup_logging() -> None:
@@ -64,7 +65,7 @@ async def timeout_watcher(bot: Bot, redis: Redis, session_factory: async_session
             for current in sessions:
                 if current.mode == "closing" or current.user_b_id == 0:
                     continue
-                if current.timeout_reminders_sent > 0:
+                if current.timeout_reminders_sent >= MAX_TIMEOUT_REMINDERS:
                     continue
                 if not current.response_deadline_exceeded(settings.user_response_timeout_seconds):
                     continue
