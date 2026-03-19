@@ -28,10 +28,22 @@ from bot.utils.keyboards import (
 
 router = Router(name="session")
 log = structlog.get_logger()
+RESUME_CHOICE_LOCK_TTL_SECONDS = 10
 
 
 def _make_service(bot: Bot, redis: Redis, session_factory: Optional[async_sessionmaker] = None) -> SessionService:
     return SessionService(SessionRepository(redis, session_factory), bot)
+
+
+async def _acquire_resume_choice_lock(redis: Redis, session_id: str) -> bool:
+    return bool(
+        await redis.set(
+            f"lock:resume_choice:{session_id}",
+            "1",
+            nx=True,
+            ex=RESUME_CHOICE_LOCK_TTL_SECONDS,
+        )
+    )
 
 
 def _regular_setup_intro() -> str:
@@ -366,8 +378,25 @@ async def cb_resume_choice(
     else:
         choice = "new_topic"
 
+    lock_acquired = await _acquire_resume_choice_lock(redis, session.session_id)
+    if not lock_acquired:
+        log.info(
+            "resume_choice_race_blocked",
+            session_id=session.session_id,
+            user_id=callback.from_user.id,
+            choice=choice,
+        )
+        await callback.answer("Партнёр уже выбрал, как продолжить.", show_alert=True)
+        return
+
     followup = _apply_resume_choice(session, choice)
     await repo.save(session)
+    log.info(
+        "resume_choice_made",
+        session_id=session.session_id,
+        user_id=callback.from_user.id,
+        choice=choice,
+    )
 
     svc = _make_service(bot, redis, session_factory)
     await svc.notify_both(session, followup, reply_markup=end_session_button())

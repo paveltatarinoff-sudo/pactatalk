@@ -1,9 +1,11 @@
 """Tests for P3.1: session resume / continuity between sessions."""
 from __future__ import annotations
 
+import asyncio
+
 from bot.models.session import SessionState
 from bot.models.pair_resume import PairResume, make_pair_key
-from bot.handlers.session import _apply_resume_choice
+from bot.handlers.session import _acquire_resume_choice_lock, _apply_resume_choice
 from bot.services.claude_service import ClaudeService, STATE_GUIDELINES, STATE_GUIDELINES_RESUME
 
 
@@ -239,3 +241,25 @@ class TestResumeConfirmationChoice:
 
         assert session.resume_context == ""
         assert "начнём заново" in message
+
+
+class _RedisSetStub:
+    def __init__(self) -> None:
+        self._taken: set[str] = set()
+
+    async def set(self, key: str, value: str, nx: bool = False, ex: int | None = None):
+        if nx and key in self._taken:
+            return False
+        self._taken.add(key)
+        return True
+
+
+class TestResumeChoiceLock:
+    def test_first_click_wins(self) -> None:
+        redis = _RedisSetStub()
+
+        first = asyncio.run(_acquire_resume_choice_lock(redis, "session-1"))
+        second = asyncio.run(_acquire_resume_choice_lock(redis, "session-1"))
+
+        assert first is True
+        assert second is False
