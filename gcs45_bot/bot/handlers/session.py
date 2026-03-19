@@ -446,7 +446,8 @@ async def cb_end_session(
 
     await svc.notify_both(
         session,
-        f"Сессия завершена. Длительность: {elapsed} мин.\n\nЧто хотите сделать с данными сессии?",
+        f"Сессия завершена. Длительность: {elapsed} мин.\n\n"
+        f"Что хотите сделать с доступными данными этой сессии — сохранить краткое резюме или удалить их сейчас?",
         reply_markup=post_session_keyboard(),
     )
     await svc.notify_both(
