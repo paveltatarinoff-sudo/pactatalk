@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from redis.asyncio import Redis
-from sqlalchemy import delete
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 import structlog
 
@@ -125,6 +125,12 @@ class SessionRepository:
     async def delete_history(self, session_id: str) -> None:
         await self._redis.delete(self._history_key(session_id))
 
+    async def _find_session_for_cleanup(self, session_id: str) -> Optional[SessionState]:
+        raw = await self._redis.get(self._key(session_id))
+        if raw is not None:
+            return _deserialize(raw)
+        return await self._load_snapshot(session_id)
+
     async def append_event(
         self,
         *,
@@ -160,6 +166,108 @@ class SessionRepository:
                 )
             )
             await db.commit()
+
+    async def list_session_ids_for_user(self, user_id: int) -> list[str]:
+        session_ids: set[str] = set()
+
+        active = await self.get_by_user(user_id)
+        if active is not None:
+            session_ids.add(active.session_id)
+
+        if self._session_factory is None:
+            return sorted(session_ids)
+
+        async with self._session_factory() as db:
+            result = await db.execute(
+                select(SessionSnapshot.session_id).where(
+                    or_(
+                        SessionSnapshot.user_a_id == user_id,
+                        SessionSnapshot.user_b_id == user_id,
+                    )
+                )
+            )
+            session_ids.update(result.scalars().all())
+
+        return sorted(session_ids)
+
+    async def delete_session_artifacts(self, session_id: str) -> None:
+        session = await self._find_session_for_cleanup(session_id)
+
+        await self._redis.delete(self._key(session_id))
+        await self._redis.delete(self._history_key(session_id))
+        await self._redis.srem(ACTIVE_SESSIONS_KEY, session_id)
+
+        if session is not None:
+            if session.user_a_id:
+                await self._redis.delete(self._user_key(session.user_a_id))
+            if session.user_b_id:
+                await self._redis.delete(self._user_key(session.user_b_id))
+            if session.invite_code:
+                await self._redis.delete(self._invite_key(session.invite_code))
+
+        if self._session_factory is None:
+            return
+
+        async with self._session_factory() as db:
+            await db.execute(delete(SessionEvent).where(SessionEvent.session_id == session_id))
+            await db.execute(delete(SessionSnapshot).where(SessionSnapshot.session_id == session_id))
+            await db.commit()
+
+    async def list_pair_keys_for_user(self, user_id: int) -> list[str]:
+        if self._session_factory is None:
+            return []
+
+        pair_keys: set[str] = set()
+        lo_pattern = f"{user_id}:%"
+        hi_pattern = f"%:{user_id}"
+
+        async with self._session_factory() as db:
+            result = await db.execute(
+                select(PairResume.pair_key).where(
+                    or_(
+                        PairResume.pair_key.like(lo_pattern),
+                        PairResume.pair_key.like(hi_pattern),
+                    )
+                )
+            )
+            pair_keys.update(result.scalars().all())
+
+        return sorted(pair_keys)
+
+    async def delete_pair_resumes_for_user(self, user_id: int) -> int:
+        pair_keys = await self.list_pair_keys_for_user(user_id)
+        if not pair_keys or self._session_factory is None:
+            return 0
+
+        async with self._session_factory() as db:
+            await db.execute(delete(PairResume).where(PairResume.pair_key.in_(pair_keys)))
+            await db.commit()
+
+        return len(pair_keys)
+
+    async def delete_user_redis_aux(self, user_id: int) -> None:
+        await self._redis.delete(
+            f"summary:{user_id}",
+            f"first_msg:{user_id}",
+            self._user_key(user_id),
+        )
+
+    async def delete_all_user_session_data(self, user_id: int) -> dict[str, int]:
+        session_ids = await self.list_session_ids_for_user(user_id)
+        pair_keys = await self.list_pair_keys_for_user(user_id)
+
+        for session_id in session_ids:
+            await self.delete_session_artifacts(session_id)
+
+        deleted_pair_resumes = await self.delete_pair_resumes_for_user(user_id)
+        await self.delete_user_redis_aux(user_id)
+
+        return {
+            "session_ids_found": len(session_ids),
+            "session_artifacts_deleted": len(session_ids),
+            "pair_keys_found": len(pair_keys),
+            "pair_resumes_deleted": deleted_pair_resumes,
+        }
 
     async def list_active_sessions(self) -> list[SessionState]:
         session_ids = await self._redis.smembers(ACTIVE_SESSIONS_KEY)
