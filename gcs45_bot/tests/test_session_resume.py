@@ -5,7 +5,7 @@ import asyncio
 
 from bot.models.session import SessionState
 from bot.models.pair_resume import PairResume, make_pair_key
-from bot.handlers.session import _acquire_resume_choice_lock, _apply_resume_choice
+from bot.handlers.session import _claim_resume_choice, _apply_resume_choice
 from bot.services.claude_service import ClaudeService, STATE_GUIDELINES, STATE_GUIDELINES_RESUME
 
 
@@ -243,23 +243,49 @@ class TestResumeConfirmationChoice:
         assert "начнём заново" in message
 
 
-class _RedisSetStub:
+class _RedisChoiceStub:
     def __init__(self) -> None:
-        self._taken: set[str] = set()
+        self._values: dict[str, str] = {}
 
     async def set(self, key: str, value: str, nx: bool = False, ex: int | None = None):
-        if nx and key in self._taken:
+        if nx and key in self._values:
             return False
-        self._taken.add(key)
+        self._values[key] = value
         return True
+
+    async def get(self, key: str):
+        return self._values.get(key)
 
 
 class TestResumeChoiceLock:
-    def test_first_click_wins(self) -> None:
-        redis = _RedisSetStub()
+    def test_first_click_claims_choice(self) -> None:
+        redis = _RedisChoiceStub()
 
-        first = asyncio.run(_acquire_resume_choice_lock(redis, "session-1"))
-        second = asyncio.run(_acquire_resume_choice_lock(redis, "session-1"))
+        claimed, effective = asyncio.run(_claim_resume_choice(redis, "session-1", "continue"))
 
-        assert first is True
-        assert second is False
+        assert claimed is True
+        assert effective == "continue"
+
+    def test_conflicting_second_click_is_ignored(self) -> None:
+        redis = _RedisChoiceStub()
+
+        first = asyncio.run(_claim_resume_choice(redis, "session-1", "new_topic"))
+        second = asyncio.run(_claim_resume_choice(redis, "session-1", "continue"))
+
+        assert first == (True, "new_topic")
+        assert second == (False, "new_topic")
+
+    def test_continue_choice_cannot_be_revived_after_fresh_start_choice(self) -> None:
+        redis = _RedisChoiceStub()
+        session = _session(state="SETUP", resume_context=SAMPLE_RESUME)
+
+        claimed, effective = asyncio.run(_claim_resume_choice(redis, "session-1", "not_accurate"))
+        assert claimed is True
+        assert effective == "not_accurate"
+
+        _apply_resume_choice(session, "not_accurate")
+        assert session.resume_context == ""
+
+        claimed_again, effective_again = asyncio.run(_claim_resume_choice(redis, "session-1", "continue"))
+        assert claimed_again is False
+        assert effective_again == "not_accurate"

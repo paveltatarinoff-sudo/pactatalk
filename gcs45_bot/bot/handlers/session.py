@@ -28,22 +28,46 @@ from bot.utils.keyboards import (
 
 router = Router(name="session")
 log = structlog.get_logger()
-RESUME_CHOICE_LOCK_TTL_SECONDS = 10
+RESUME_CHOICE_RESULT_TTL_SECONDS = 60 * 60 * 24
 
 
 def _make_service(bot: Bot, redis: Redis, session_factory: Optional[async_sessionmaker] = None) -> SessionService:
     return SessionService(SessionRepository(redis, session_factory), bot)
 
 
-async def _acquire_resume_choice_lock(redis: Redis, session_id: str) -> bool:
-    return bool(
-        await redis.set(
-            f"lock:resume_choice:{session_id}",
-            "1",
-            nx=True,
-            ex=RESUME_CHOICE_LOCK_TTL_SECONDS,
-        )
+async def _claim_resume_choice(redis: Redis, session_id: str, choice: str) -> tuple[bool, str]:
+    key = f"resume_choice:{session_id}"
+    claimed = await redis.set(
+        key,
+        choice,
+        nx=True,
+        ex=RESUME_CHOICE_RESULT_TTL_SECONDS,
     )
+    if claimed:
+        return True, choice
+    existing = await redis.get(key)
+    if isinstance(existing, bytes):
+        existing = existing.decode("utf-8")
+    return False, str(existing or "")
+
+
+async def _clear_resume_confirmation_buttons(session: SessionState, bot: Bot) -> None:
+    for chat_id, message_id, side in (
+        (session.user_a_id, session.first_msg_id_a, "A"),
+        (session.user_b_id, session.first_msg_id_b, "B"),
+    ):
+        if not message_id:
+            continue
+        try:
+            await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None)
+        except Exception:
+            log.warning(
+                "resume_choice_clear_buttons_failed",
+                session_id=session.session_id,
+                side=side,
+                user_id=chat_id,
+                message_id=message_id,
+            )
 
 
 def _regular_setup_intro() -> str:
@@ -410,15 +434,16 @@ async def cb_resume_choice(
     else:
         choice = "new_topic"
 
-    lock_acquired = await _acquire_resume_choice_lock(redis, session.session_id)
-    if not lock_acquired:
+    claimed, effective_choice = await _claim_resume_choice(redis, session.session_id, choice)
+    if not claimed:
         log.info(
-            "resume_choice_race_blocked",
+            "resume_choice_duplicate_ignored",
             session_id=session.session_id,
             user_id=callback.from_user.id,
             choice=choice,
+            effective_choice=effective_choice,
         )
-        await callback.answer("Партнёр уже выбрал, как продолжить.", show_alert=True)
+        await callback.answer("Выбор уже зафиксирован. Продолжаем по нему.", show_alert=True)
         return
 
     followup = _apply_resume_choice(session, choice)
@@ -429,6 +454,7 @@ async def cb_resume_choice(
         user_id=callback.from_user.id,
         choice=choice,
     )
+    await _clear_resume_confirmation_buttons(session, bot)
 
     svc = _make_service(bot, redis, session_factory)
     await svc.notify_both(session, followup, reply_markup=end_session_button())
