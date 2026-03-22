@@ -1,0 +1,19 @@
+app = "pactatalk-bot"
+primary_region = "fra"  # Frankfurt — близко к Neon eu-central и Upstash EU
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false   # бот должен работать постоянно
+  min_machines_running = 1
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

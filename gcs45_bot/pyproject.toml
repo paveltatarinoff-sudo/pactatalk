@@ -1,0 +1,35 @@
+[project]
+name = "pactatalk-bot"
+version = "0.1.0"
+description = "PactaTalk — AI-фасилитатор диалога для пар в Telegram"
+requires-python = ">=3.9"
+
+dependencies = [
+    "aiogram>=3.13.0",
+    "openai>=1.50.0",
+    "redis[asyncio]>=5.0.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.30.0",
+    "alembic>=1.13.0",
+    "pydantic-settings>=2.6.0",
+    "pydantic>=2.9.0",
+    "structlog>=24.4.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-mock>=3.14.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
