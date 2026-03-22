@@ -16,6 +16,12 @@ from bot.fsm.states import SessionFlow
 from bot.models.session import SessionState
 from bot.repositories.session_repo import SessionRepository
 from bot.services.claude_service import MAX_MESSAGE_LENGTH, OpenAIServiceError
+from bot.services.resume_choice import (
+    RESUME_CHOICE_ALIGNMENT_PENDING,
+    RESUME_CHOICE_CONTINUE,
+    get_resume_resolution,
+    process_alignment_reply,
+)
 from bot.services.session_service import SessionService
 from bot.services.shared import claude as _claude
 from bot.utils.keyboards import post_session_keyboard, end_session_keyboard, end_session_button, main_menu_keyboard
@@ -150,6 +156,83 @@ def _reply_extras(session: SessionState) -> tuple[str, object]:
     return _speaker_signature(session), end_session_button()
 
 
+def _resume_continue_intro() -> str:
+    return (
+        "Продолжим прошлую тему.\n\n"
+        "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+        "Напишите каждый коротко: <b>что в этой теме сейчас для вас самое живое или важное?</b>\n"
+        "Отвечайте независимо — я жду ответа от вас обоих."
+    )
+
+
+def _resume_alignment_retry_intro() -> str:
+    return (
+        "Пока я не вижу общего решения.\n\n"
+        "Напишите ещё раз коротко и прямо: <b>продолжить прошлую тему</b> "
+        "или <b>начать новую</b>."
+    )
+
+
+def _regular_setup_intro() -> str:
+    return (
+        "Давайте начнём. Я здесь, чтобы помочь вам услышать друг друга.\n\n"
+        "Как это работает:\n"
+        "• Пишешь сообщение или голосовое 🎤 — фасилитатор отвечает вам обоим\n"
+        "• Говорит один, второй слушает — я слежу за очерёдностью\n"
+        "• Завершить сессию можно в любой момент кнопкой ниже\n\n"
+        "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+        "Напишите каждый своё: <b>что ты хочешь получить от этого разговора?</b>\n"
+        "Отвечайте независимо — я жду ответа от вас обоих."
+    )
+
+
+def _apply_resume_resolution(session: SessionState, resolution: str) -> str:
+    if resolution == RESUME_CHOICE_CONTINUE:
+        return _resume_continue_intro()
+    session.resume_context = ""
+    return _regular_setup_intro()
+
+
+async def _handle_resume_alignment_text(
+    *,
+    session: SessionState,
+    user_id: int,
+    text: str,
+    bot: Bot,
+    redis,
+    repo: SessionRepository,
+) -> None:
+    status, resolution = await process_alignment_reply(
+        redis,
+        session_id=session.session_id,
+        user_id=user_id,
+        user_a_id=session.user_a_id,
+        user_b_id=session.user_b_id,
+        text=text,
+    )
+    if status == "waiting":
+        await bot.send_message(
+            user_id,
+            "Принято. Жду ответа партнёра, чтобы понять, как начать разговор.",
+        )
+        return
+
+    svc = _svc(bot, repo)
+    if status == "resolved" and resolution is not None:
+        followup = _apply_resume_resolution(session, resolution)
+        await repo.save(session)
+        log.info(
+            "resume_choice_alignment_resolved",
+            session_id=session.session_id,
+            resolution=resolution,
+        )
+        await svc.notify_both(session, followup, reply_markup=end_session_button())
+        return
+
+    log.info("resume_choice_alignment_retry", session_id=session.session_id)
+    await svc.notify_both(session, _resume_alignment_retry_intro(), reply_markup=end_session_button())
+
+
 async def _notify_admins_about_risk(bot: Bot, session: SessionState) -> None:
     if not settings.admin_ids:
         return
@@ -206,6 +289,39 @@ async def handle_session_message(
             "Сообщение получилось слишком длинным. Лучше выделить главное и отправить короче."
         )
         return
+
+    resume_resolution = None
+    if session.resume_context:
+        resume_resolution = await get_resume_resolution(redis, session.session_id)
+        if resume_resolution is None:
+            await message.answer("Сначала выберите на кнопке: продолжить прошлую тему или начать новую.")
+            return
+        if resume_resolution == RESUME_CHOICE_ALIGNMENT_PENDING:
+            throttle_ok = await _acquire_message_throttle(redis, user_id)
+            if not throttle_ok:
+                bound_log.info("message_throttled", input_type="text")
+                await message.answer("Нужно немного подождать перед следующим сообщением.")
+                return
+
+            lock = _get_lock(session.session_id)
+            if lock.locked():
+                bound_log.info("turn_rejected_lock_busy")
+                await message.answer("Слушаю внимательно...")
+                return
+
+            async with lock:
+                fresh = await repo.get(session.session_id)
+                if fresh is not None:
+                    session = fresh
+                await _handle_resume_alignment_text(
+                    session=session,
+                    user_id=user_id,
+                    text=message.text or "",
+                    bot=bot,
+                    redis=redis,
+                    repo=repo,
+                )
+            return
 
     if not session.is_active_speaker(user_id):
         bound_log.info("turn_rejected_not_active_speaker", waiting_for=session.waiting_for)
@@ -281,7 +397,14 @@ async def handle_voice_message(
         return
     bound_log = log.bind(session_id=session.session_id, user_id=user_id, sender=sender_label)
 
-    if not session.is_active_speaker(user_id):
+    resume_resolution = None
+    if session.resume_context:
+        resume_resolution = await get_resume_resolution(redis, session.session_id)
+        if resume_resolution is None:
+            await message.answer("Сначала выберите на кнопке: продолжить прошлую тему или начать новую.")
+            return
+
+    if resume_resolution != RESUME_CHOICE_ALIGNMENT_PENDING and not session.is_active_speaker(user_id):
         bound_log.info("voice_rejected_not_active_speaker", waiting_for=session.waiting_for)
         await message.answer("Я вижу, тебе есть что сказать. Дождёмся ответа партнёра — скоро будет твоя очередь.")
         return
@@ -302,6 +425,8 @@ async def handle_voice_message(
         fresh = await repo.get(session.session_id)
         if fresh is not None:
             session = fresh
+            if session.resume_context and resume_resolution is None:
+                resume_resolution = await get_resume_resolution(redis, session.session_id)
 
         await bot.send_chat_action(message.chat.id, "typing")
         try:
@@ -330,6 +455,17 @@ async def handle_voice_message(
 
         safe_text = html.escape(text)
         await message.answer(f"🎤 <i>{safe_text}</i>")
+
+        if resume_resolution == RESUME_CHOICE_ALIGNMENT_PENDING:
+            await _handle_resume_alignment_text(
+                session=session,
+                user_id=user_id,
+                text=text,
+                bot=bot,
+                redis=redis,
+                repo=repo,
+            )
+            return
 
         if session.waiting_for == "BOTH":
             await _collect_for_both(

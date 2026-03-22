@@ -13,7 +13,17 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 import structlog
 
 from bot.fsm.states import UserFlow, SessionFlow
+from bot.models.session import SessionState
 from bot.repositories.session_repo import SessionRepository
+from bot.services.resume_choice import (
+    RESUME_CHOICE_ALIGNMENT_PENDING,
+    RESUME_CHOICE_CONTINUE,
+    RESUME_CHOICE_NEW_TOPIC,
+    get_resume_resolution,
+    normalize_resume_choice,
+    record_resume_vote,
+    reset_resume_choice_state,
+)
 from bot.services.session_service import SessionService
 from bot.services.shared import claude as _claude
 from bot.handlers.facilitator import _release_lock
@@ -28,27 +38,10 @@ from bot.utils.keyboards import (
 
 router = Router(name="session")
 log = structlog.get_logger()
-RESUME_CHOICE_RESULT_TTL_SECONDS = 60 * 60 * 24
 
 
 def _make_service(bot: Bot, redis: Redis, session_factory: Optional[async_sessionmaker] = None) -> SessionService:
     return SessionService(SessionRepository(redis, session_factory), bot)
-
-
-async def _claim_resume_choice(redis: Redis, session_id: str, choice: str) -> tuple[bool, str]:
-    key = f"resume_choice:{session_id}"
-    claimed = await redis.set(
-        key,
-        choice,
-        nx=True,
-        ex=RESUME_CHOICE_RESULT_TTL_SECONDS,
-    )
-    if claimed:
-        return True, choice
-    existing = await redis.get(key)
-    if isinstance(existing, bytes):
-        existing = existing.decode("utf-8")
-    return False, str(existing or "")
 
 
 async def _clear_resume_confirmation_buttons(session: SessionState, bot: Bot) -> None:
@@ -70,6 +63,28 @@ async def _clear_resume_confirmation_buttons(session: SessionState, bot: Bot) ->
             )
 
 
+async def _clear_single_resume_button(callback: CallbackQuery, session_id: str) -> None:
+    if callback.message is None:
+        return
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        log.warning(
+            "resume_choice_clear_single_button_failed",
+            session_id=session_id,
+            user_id=callback.from_user.id,
+            message_id=callback.message.message_id,
+        )
+
+
+def _setup_question_block() -> str:
+    return (
+        f"<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+        f"Напишите каждый своё: <b>что ты хочешь получить от этого разговора?</b>\n"
+        f"Отвечайте независимо — я жду ответа от вас обоих."
+    )
+
+
 def _regular_setup_intro() -> str:
     return (
         f"Давайте начнём. Я здесь, чтобы помочь вам услышать друг друга.\n\n"
@@ -77,9 +92,7 @@ def _regular_setup_intro() -> str:
         f"• Пишешь сообщение или голосовое 🎤 — фасилитатор отвечает вам обоим\n"
         f"• Говорит один, второй слушает — я слежу за очерёдностью\n"
         f"• Завершить сессию можно в любой момент кнопкой ниже\n\n"
-        f"<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
-        f"Напишите каждый своё: <b>что ты хочешь получить от этого разговора?</b>\n"
-        f"Отвечайте независимо — я жду ответа от вас обоих."
+        f"{_setup_question_block()}"
     )
 
 
@@ -90,28 +103,44 @@ def _resume_confirmation_intro(session: SessionState) -> str:
         f"Вот как я его запомнил:\n\n"
         f"<blockquote>{safe_resume}</blockquote>\n\n"
         f"Если это похоже на ваш прошлый разговор, можно продолжить с этого места. "
-        f"Если нет — начнём заново."
+        f"Если нет — начнём заново.\n\n"
+        f"Выберите оба, как хотите начать этот разговор."
     )
 
 
-def _apply_resume_choice(session: SessionState, choice: str) -> str:
-    if choice == "continue":
+def _resume_continue_intro() -> str:
+    return (
+        "Продолжим прошлую тему.\n\n"
+        "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+        "Напишите каждый коротко: <b>что в этой теме сейчас для вас самое живое или важное?</b>\n"
+        "Отвечайте независимо — я жду ответа от вас обоих."
+    )
+
+
+def _resume_alignment_intro() -> str:
+    return (
+        "Вы выбрали по-разному: один хочет продолжить прошлую тему, другой — начать новую.\n\n"
+        "Напишите каждый одним-двумя предложениями: <b>вам сейчас важнее продолжить прошлую тему "
+        "или начать новую — и почему?</b>\n"
+        "Отвечайте независимо — я подожду ответы от вас обоих."
+    )
+
+
+def _resume_alignment_retry_intro() -> str:
+    return (
+        "Пока я не вижу общего решения.\n\n"
+        "Напишите ещё раз коротко и прямо: <b>продолжить прошлую тему</b> или "
+        "<b>начать новую</b>."
+    )
+
+
+def _apply_resume_resolution(session: SessionState, resolution: str) -> str:
+    if resolution == RESUME_CHOICE_CONTINUE:
         return (
-            "Продолжим с этого места.\n\n"
-            "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
-            "Напишите каждый: <b>хотите продолжить прошлую тему или начать новую?</b>\n"
-            "Отвечайте независимо — я жду ответа от вас обоих."
+            _resume_continue_intro()
         )
 
     session.resume_context = ""
-    if choice == "not_accurate":
-        return (
-            "Понял, значит начнём заново.\n\n"
-            "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
-            "Напишите каждый своё: <b>что ты хочешь получить от этого разговора?</b>\n"
-            "Отвечайте независимо — я жду ответа от вас обоих."
-        )
-
     return _regular_setup_intro()
 
 
@@ -398,6 +427,7 @@ async def cb_join_confirm(
         )
 
     if session.resume_context:
+        await reset_resume_choice_state(redis, session.session_id, (session.user_a_id, session.user_b_id))
         common_intro = _resume_confirmation_intro(session)
         reply_markup = resume_confirmation_keyboard()
     else:
@@ -427,38 +457,90 @@ async def cb_resume_choice(
         await callback.answer("Сессия не найдена.", show_alert=True)
         return
 
-    if callback.data == "session:resume_continue":
-        choice = "continue"
-    elif callback.data == "session:resume_not_accurate":
-        choice = "not_accurate"
-    else:
-        choice = "new_topic"
+    choice = normalize_resume_choice(callback.data)
+    if choice is None:
+        await callback.answer("Не удалось распознать выбор.", show_alert=True)
+        return
 
-    claimed, effective_choice = await _claim_resume_choice(redis, session.session_id, choice)
-    if not claimed:
+    existing_resolution = await get_resume_resolution(redis, session.session_id)
+    if existing_resolution == RESUME_CHOICE_ALIGNMENT_PENDING:
+        await callback.answer("Вы уже выбрали по-разному. Ответьте коротко текстом.", show_alert=True)
+        return
+
+    if existing_resolution in (RESUME_CHOICE_CONTINUE, RESUME_CHOICE_NEW_TOPIC):
+        log.info(
+            "resume_choice_resolution_already_exists",
+            session_id=session.session_id,
+            user_id=callback.from_user.id,
+            choice=choice,
+            resolution=existing_resolution,
+        )
+        await callback.answer("Выбор уже завершён. Продолжаем по нему.", show_alert=True)
+        return
+
+    status, resolution = await record_resume_vote(
+        redis,
+        session_id=session.session_id,
+        user_id=callback.from_user.id,
+        user_a_id=session.user_a_id,
+        user_b_id=session.user_b_id,
+        choice=choice,
+    )
+
+    if status == "resolved":
+        await callback.answer("Выбор уже завершён. Продолжаем по нему.", show_alert=True)
+        return
+
+    svc = _make_service(bot, redis, session_factory)
+    if status == "duplicate":
         log.info(
             "resume_choice_duplicate_ignored",
             session_id=session.session_id,
             user_id=callback.from_user.id,
             choice=choice,
-            effective_choice=effective_choice,
+            effective_choice=resolution,
         )
-        await callback.answer("Выбор уже зафиксирован. Продолжаем по нему.", show_alert=True)
+        await callback.answer("Твой выбор уже учтён. Ждём партнёра.", show_alert=True)
         return
 
-    followup = _apply_resume_choice(session, choice)
-    await repo.save(session)
-    log.info(
-        "resume_choice_made",
-        session_id=session.session_id,
-        user_id=callback.from_user.id,
-        choice=choice,
-    )
-    await _clear_resume_confirmation_buttons(session, bot)
+    if status == "waiting":
+        log.info(
+            "resume_choice_recorded_waiting_partner",
+            session_id=session.session_id,
+            user_id=callback.from_user.id,
+            choice=choice,
+        )
+        await _clear_single_resume_button(callback, session.session_id)
+        await callback.answer("Твой выбор учтён. Ждём решение партнёра.")
+        return
 
-    svc = _make_service(bot, redis, session_factory)
-    await svc.notify_both(session, followup, reply_markup=end_session_button())
-    await callback.answer()
+    if status == "matched" and resolution in (RESUME_CHOICE_CONTINUE, RESUME_CHOICE_NEW_TOPIC):
+        followup = _apply_resume_resolution(session, resolution)
+        await repo.save(session)
+        log.info(
+            "resume_choice_pair_matched",
+            session_id=session.session_id,
+            user_id=callback.from_user.id,
+            resolution=resolution,
+        )
+        await _clear_resume_confirmation_buttons(session, bot)
+        await svc.notify_both(session, followup, reply_markup=end_session_button())
+        await callback.answer()
+        return
+
+    if status == "mismatch":
+        log.info(
+            "resume_choice_pair_mismatch",
+            session_id=session.session_id,
+            user_id=callback.from_user.id,
+        )
+        await _clear_resume_confirmation_buttons(session, bot)
+        await repo.save(session)
+        await svc.notify_both(session, _resume_alignment_intro(), reply_markup=end_session_button())
+        await callback.answer("Вы выбрали по-разному. Давайте коротко согласуем это текстом.")
+        return
+
+    await callback.answer("Не удалось обработать выбор.", show_alert=True)
 
 
 @router.callback_query(F.data == "join:decline")

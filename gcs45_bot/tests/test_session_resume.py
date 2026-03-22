@@ -5,7 +5,18 @@ import asyncio
 
 from bot.models.session import SessionState
 from bot.models.pair_resume import PairResume, make_pair_key
-from bot.handlers.session import _claim_resume_choice, _apply_resume_choice
+from bot.handlers.session import _apply_resume_resolution
+from bot.services.resume_choice import (
+    RESUME_CHOICE_ALIGNMENT_PENDING,
+    RESUME_CHOICE_CONTINUE,
+    RESUME_CHOICE_NEW_TOPIC,
+    classify_resume_resolution_text,
+    decide_resume_resolution,
+    get_resume_resolution,
+    normalize_resume_choice,
+    process_alignment_reply,
+    record_resume_vote,
+)
 from bot.services.claude_service import ClaudeService, STATE_GUIDELINES, STATE_GUIDELINES_RESUME
 
 
@@ -223,24 +234,20 @@ class TestResumeGuidelinesP33:
 class TestResumeConfirmationChoice:
     def test_continue_keeps_resume(self) -> None:
         session = _session(state="SETUP", resume_context=SAMPLE_RESUME)
-        message = _apply_resume_choice(session, "continue")
+        message = _apply_resume_resolution(session, RESUME_CHOICE_CONTINUE)
 
         assert session.resume_context == SAMPLE_RESUME
-        assert "Продолжим с этого места" in message
+        assert "Продолжим прошлую тему" in message
 
     def test_new_topic_clears_resume(self) -> None:
         session = _session(state="SETUP", resume_context=SAMPLE_RESUME)
-        message = _apply_resume_choice(session, "new_topic")
+        message = _apply_resume_resolution(session, RESUME_CHOICE_NEW_TOPIC)
 
         assert session.resume_context == ""
         assert "что ты хочешь получить от этого разговора" in message
 
-    def test_not_accurate_clears_resume(self) -> None:
-        session = _session(state="SETUP", resume_context=SAMPLE_RESUME)
-        message = _apply_resume_choice(session, "not_accurate")
-
-        assert session.resume_context == ""
-        assert "начнём заново" in message
+    def test_stale_not_accurate_maps_to_new_topic(self) -> None:
+        assert normalize_resume_choice("session:resume_not_accurate") == RESUME_CHOICE_NEW_TOPIC
 
 
 class _RedisChoiceStub:
@@ -256,36 +263,207 @@ class _RedisChoiceStub:
     async def get(self, key: str):
         return self._values.get(key)
 
+    async def delete(self, *keys: str):
+        deleted = 0
+        for key in keys:
+            if key in self._values:
+                del self._values[key]
+                deleted += 1
+        return deleted
 
-class TestResumeChoiceLock:
-    def test_first_click_claims_choice(self) -> None:
+
+class TestResumePairVoting:
+    def test_first_vote_waits_for_partner(self) -> None:
         redis = _RedisChoiceStub()
+        status, resolution = asyncio.run(
+            record_resume_vote(
+                redis,
+                session_id="session-1",
+                user_id=100,
+                user_a_id=100,
+                user_b_id=200,
+                choice=RESUME_CHOICE_CONTINUE,
+            )
+        )
 
-        claimed, effective = asyncio.run(_claim_resume_choice(redis, "session-1", "continue"))
+        assert status == "waiting"
+        assert resolution == RESUME_CHOICE_CONTINUE
+        assert asyncio.run(get_resume_resolution(redis, "session-1")) is None
 
-        assert claimed is True
-        assert effective == "continue"
-
-    def test_conflicting_second_click_is_ignored(self) -> None:
+    def test_matching_votes_resolve_continue(self) -> None:
         redis = _RedisChoiceStub()
+        asyncio.run(
+            record_resume_vote(
+                redis,
+                session_id="session-1",
+                user_id=100,
+                user_a_id=100,
+                user_b_id=200,
+                choice=RESUME_CHOICE_CONTINUE,
+            )
+        )
+        status, resolution = asyncio.run(
+            record_resume_vote(
+                redis,
+                session_id="session-1",
+                user_id=200,
+                user_a_id=100,
+                user_b_id=200,
+                choice=RESUME_CHOICE_CONTINUE,
+            )
+        )
 
-        first = asyncio.run(_claim_resume_choice(redis, "session-1", "new_topic"))
-        second = asyncio.run(_claim_resume_choice(redis, "session-1", "continue"))
+        assert status == "matched"
+        assert resolution == RESUME_CHOICE_CONTINUE
+        assert asyncio.run(get_resume_resolution(redis, "session-1")) == RESUME_CHOICE_CONTINUE
 
-        assert first == (True, "new_topic")
-        assert second == (False, "new_topic")
-
-    def test_continue_choice_cannot_be_revived_after_fresh_start_choice(self) -> None:
+    def test_conflicting_votes_enter_alignment_pending(self) -> None:
         redis = _RedisChoiceStub()
-        session = _session(state="SETUP", resume_context=SAMPLE_RESUME)
+        asyncio.run(
+            record_resume_vote(
+                redis,
+                session_id="session-1",
+                user_id=100,
+                user_a_id=100,
+                user_b_id=200,
+                choice=RESUME_CHOICE_NEW_TOPIC,
+            )
+        )
+        status, resolution = asyncio.run(
+            record_resume_vote(
+                redis,
+                session_id="session-1",
+                user_id=200,
+                user_a_id=100,
+                user_b_id=200,
+                choice=RESUME_CHOICE_CONTINUE,
+            )
+        )
 
-        claimed, effective = asyncio.run(_claim_resume_choice(redis, "session-1", "not_accurate"))
-        assert claimed is True
-        assert effective == "not_accurate"
+        assert status == "mismatch"
+        assert resolution is None
+        assert asyncio.run(get_resume_resolution(redis, "session-1")) == RESUME_CHOICE_ALIGNMENT_PENDING
 
-        _apply_resume_choice(session, "not_accurate")
-        assert session.resume_context == ""
+    def test_duplicate_vote_from_same_user_is_ignored(self) -> None:
+        redis = _RedisChoiceStub()
+        asyncio.run(
+            record_resume_vote(
+                redis,
+                session_id="session-1",
+                user_id=100,
+                user_a_id=100,
+                user_b_id=200,
+                choice=RESUME_CHOICE_NEW_TOPIC,
+            )
+        )
+        status, resolution = asyncio.run(
+            record_resume_vote(
+                redis,
+                session_id="session-1",
+                user_id=100,
+                user_a_id=100,
+                user_b_id=200,
+                choice=RESUME_CHOICE_CONTINUE,
+            )
+        )
 
-        claimed_again, effective_again = asyncio.run(_claim_resume_choice(redis, "session-1", "continue"))
-        assert claimed_again is False
-        assert effective_again == "not_accurate"
+        assert status == "duplicate"
+        assert resolution == RESUME_CHOICE_NEW_TOPIC
+
+
+class TestResumeAlignmentResolution:
+    def test_alignment_text_resolves_continue(self) -> None:
+        redis = _RedisChoiceStub()
+        asyncio.run(redis.set("resume_resolution:session-1", RESUME_CHOICE_ALIGNMENT_PENDING))
+
+        first = asyncio.run(
+            process_alignment_reply(
+                redis,
+                session_id="session-1",
+                user_id=100,
+                user_a_id=100,
+                user_b_id=200,
+                text="Хочу продолжить прошлую тему.",
+            )
+        )
+        second = asyncio.run(
+            process_alignment_reply(
+                redis,
+                session_id="session-1",
+                user_id=200,
+                user_a_id=100,
+                user_b_id=200,
+                text="Давайте продолжим с этого места.",
+            )
+        )
+
+        assert first == ("waiting", None)
+        assert second == ("resolved", RESUME_CHOICE_CONTINUE)
+        assert asyncio.run(get_resume_resolution(redis, "session-1")) == RESUME_CHOICE_CONTINUE
+
+    def test_alignment_text_resolves_new_topic(self) -> None:
+        redis = _RedisChoiceStub()
+        asyncio.run(redis.set("resume_resolution:session-1", RESUME_CHOICE_ALIGNMENT_PENDING))
+
+        asyncio.run(
+            process_alignment_reply(
+                redis,
+                session_id="session-1",
+                user_id=100,
+                user_a_id=100,
+                user_b_id=200,
+                text="Лучше начать новую тему.",
+            )
+        )
+        result = asyncio.run(
+            process_alignment_reply(
+                redis,
+                session_id="session-1",
+                user_id=200,
+                user_a_id=100,
+                user_b_id=200,
+                text="Мне важнее начать заново.",
+            )
+        )
+
+        assert result == ("resolved", RESUME_CHOICE_NEW_TOPIC)
+        assert asyncio.run(get_resume_resolution(redis, "session-1")) == RESUME_CHOICE_NEW_TOPIC
+
+    def test_alignment_text_retry_when_answers_do_not_converge(self) -> None:
+        redis = _RedisChoiceStub()
+        asyncio.run(redis.set("resume_resolution:session-1", RESUME_CHOICE_ALIGNMENT_PENDING))
+
+        asyncio.run(
+            process_alignment_reply(
+                redis,
+                session_id="session-1",
+                user_id=100,
+                user_a_id=100,
+                user_b_id=200,
+                text="Не знаю, может продолжить.",
+            )
+        )
+        result = asyncio.run(
+            process_alignment_reply(
+                redis,
+                session_id="session-1",
+                user_id=200,
+                user_a_id=100,
+                user_b_id=200,
+                text="Не уверен, как лучше.",
+            )
+        )
+
+        assert result == ("retry", None)
+        assert asyncio.run(get_resume_resolution(redis, "session-1")) == RESUME_CHOICE_ALIGNMENT_PENDING
+
+
+class TestResumeTextClassification:
+    def test_continue_markers_detected(self) -> None:
+        assert classify_resume_resolution_text("Хочу продолжить прошлую тему") == RESUME_CHOICE_CONTINUE
+
+    def test_new_topic_markers_detected(self) -> None:
+        assert classify_resume_resolution_text("Давай начнем новую тему") == RESUME_CHOICE_NEW_TOPIC
+
+    def test_pair_decision_requires_same_direction(self) -> None:
+        assert decide_resume_resolution("Продолжим с этого места", "Начнем новую тему") is None
