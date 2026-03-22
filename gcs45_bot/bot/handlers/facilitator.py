@@ -89,6 +89,41 @@ def _normalize_text(value: str | None) -> str:
     return " ".join((value or "").strip().lower().replace("ё", "е").split())
 
 
+def _starts_with_partner_name(message: str, name: str) -> bool:
+    stripped = (message or "").lstrip()
+    if not stripped or not name:
+        return False
+    lowered = stripped.lower()
+    candidate = name.strip().lower()
+    return lowered.startswith(f"{candidate},") or lowered.startswith(f"{candidate}:")
+
+
+def _detect_explicit_reply_addressee(session: SessionState, reply: str) -> str | None:
+    if _starts_with_partner_name(reply, session.name_a):
+        return "A"
+    if _starts_with_partner_name(reply, session.name_b):
+        return "B"
+
+    normalized = _normalize_text(reply)
+    joint_markers = (
+        "вы оба",
+        "вам обоим",
+        "каждый из вас",
+        "оба говорите",
+        "у вас обоих",
+    )
+    if any(normalized.startswith(marker) for marker in joint_markers):
+        return "BOTH"
+    return None
+
+
+def _align_next_speaker_with_reply(session: SessionState, reply: str, next_speaker: str) -> tuple[str, str | None]:
+    explicit_addressee = _detect_explicit_reply_addressee(session, reply)
+    if explicit_addressee in ("A", "B", "BOTH") and explicit_addressee != next_speaker:
+        return explicit_addressee, "reply_address_conflict"
+    return next_speaker, None
+
+
 def _looks_like_address_feedback(message: str) -> bool:
     normalized = _normalize_text(message)
     return any(pattern in normalized for pattern in ADDRESS_FEEDBACK_PATTERNS)
@@ -446,6 +481,18 @@ async def _collect_for_both(
 
     dialogue_state_before = response_meta.get("dialogue_state_before")
     waiting_for_before = response_meta.get("waiting_for_before")
+    aligned_next_speaker, alignment_reason = _align_next_speaker_with_reply(session, reply, next_speaker)
+    if alignment_reason is not None:
+        log.info(
+            "facilitator_reply_routing_aligned",
+            session_id=session.session_id,
+            reason=alignment_reason,
+            next_speaker_was=next_speaker,
+            next_speaker_now=aligned_next_speaker,
+        )
+        next_speaker = aligned_next_speaker
+        response_meta["addressed_to"] = aligned_next_speaker
+        response_meta["next_speaker"] = aligned_next_speaker
     _apply_next_speaker(session, next_speaker)
     signature, keyboard = _reply_extras(session)
     full_reply = reply + signature
@@ -567,6 +614,18 @@ async def _process_turn(
 
     dialogue_state_before = response_meta.get("dialogue_state_before")
     waiting_for_before = response_meta.get("waiting_for_before")
+    aligned_next_speaker, alignment_reason = _align_next_speaker_with_reply(session, reply, next_speaker)
+    if alignment_reason is not None:
+        log.info(
+            "facilitator_reply_routing_aligned",
+            session_id=session.session_id,
+            reason=alignment_reason,
+            next_speaker_was=next_speaker,
+            next_speaker_now=aligned_next_speaker,
+        )
+        next_speaker = aligned_next_speaker
+        response_meta["addressed_to"] = aligned_next_speaker
+        response_meta["next_speaker"] = aligned_next_speaker
     _apply_next_speaker(session, next_speaker)
     signature, keyboard = _reply_extras(session)
     full_reply = reply + signature

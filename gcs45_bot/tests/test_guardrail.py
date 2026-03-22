@@ -190,7 +190,7 @@ def test_process_turn_uses_service_handoff_as_pass_through(monkeypatch) -> None:
     class _ClaudeStub:
         async def get_facilitator_response(self, session, user_message, sender_label, repo, **kwargs):
             return (
-                "Pasha, я услышал тебя.",
+                "Спасибо. Хочу услышать вторую сторону.",
                 False,
                 "B",
                 {
@@ -224,6 +224,132 @@ def test_process_turn_uses_service_handoff_as_pass_through(monkeypatch) -> None:
 
     assert session.waiting_for == "B"
     assert repo.events[-1]["next_speaker"] == "B"
+
+
+def test_process_turn_aligns_question_to_a_with_next_speaker_a(monkeypatch) -> None:
+    class _ClaudeStub:
+        async def get_facilitator_response(self, session, user_message, sender_label, repo, **kwargs):
+            return (
+                "Pasha, давай останемся с твоим переживанием ещё немного.",
+                False,
+                "B",
+                {
+                    "dialogue_state_before": session.dialogue_state,
+                    "waiting_for_before": session.waiting_for,
+                    "addressed_to": "B",
+                    "next_speaker": "B",
+                    "risk_flag": False,
+                },
+            )
+
+    monkeypatch.setattr(facilitator, "_claude", _ClaudeStub())
+    monkeypatch.setattr(facilitator, "_reply_extras", lambda session: ("", None))
+
+    session = _session(waiting_for="A")
+    repo = _RepoStub()
+    bot = _BotStub()
+    message = _MessageStub(user_id=1)
+
+    asyncio.run(
+        facilitator._process_turn(
+            text="обычный ответ",
+            relay_text="обычный ответ",
+            message=message,
+            session=session,
+            sender_label="A",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+
+    assert session.waiting_for == "A"
+    assert repo.events[-1]["next_speaker"] == "A"
+    assert repo.events[-1]["addressed_to"] == "A"
+
+
+def test_process_turn_aligns_question_to_b_with_next_speaker_b(monkeypatch) -> None:
+    class _ClaudeStub:
+        async def get_facilitator_response(self, session, user_message, sender_label, repo, **kwargs):
+            return (
+                "Lyuda, как это для тебя сейчас звучит?",
+                False,
+                "A",
+                {
+                    "dialogue_state_before": session.dialogue_state,
+                    "waiting_for_before": session.waiting_for,
+                    "addressed_to": "A",
+                    "next_speaker": "A",
+                    "risk_flag": False,
+                },
+            )
+
+    monkeypatch.setattr(facilitator, "_claude", _ClaudeStub())
+    monkeypatch.setattr(facilitator, "_reply_extras", lambda session: ("", None))
+
+    session = _session(waiting_for="A")
+    repo = _RepoStub()
+    bot = _BotStub()
+    message = _MessageStub(user_id=1)
+
+    asyncio.run(
+        facilitator._process_turn(
+            text="обычный ответ",
+            relay_text="обычный ответ",
+            message=message,
+            session=session,
+            sender_label="A",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+
+    assert session.waiting_for == "B"
+    assert repo.events[-1]["next_speaker"] == "B"
+    assert repo.events[-1]["addressed_to"] == "B"
+
+
+def test_process_turn_keeps_both_only_for_joint_reply(monkeypatch) -> None:
+    class _ClaudeStub:
+        async def get_facilitator_response(self, session, user_message, sender_label, repo, **kwargs):
+            return (
+                "Вы оба сейчас говорите о том, как быстро накапливается усталость. С чего начнём?",
+                False,
+                "A",
+                {
+                    "dialogue_state_before": session.dialogue_state,
+                    "waiting_for_before": session.waiting_for,
+                    "addressed_to": "A",
+                    "next_speaker": "A",
+                    "risk_flag": False,
+                },
+            )
+
+    monkeypatch.setattr(facilitator, "_claude", _ClaudeStub())
+    monkeypatch.setattr(facilitator, "_reply_extras", lambda session: ("", None))
+
+    session = _session(waiting_for="A", state="OPTIONS")
+    repo = _RepoStub()
+    bot = _BotStub()
+    message = _MessageStub(user_id=1)
+
+    asyncio.run(
+        facilitator._process_turn(
+            text="обычный ответ",
+            relay_text="обычный ответ",
+            message=message,
+            session=session,
+            sender_label="A",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+
+    assert session.waiting_for == "BOTH"
+    assert repo.events[-1]["next_speaker"] == "BOTH"
+    assert repo.events[-1]["addressed_to"] == "BOTH"
 
 
 def test_add_message_truncates_history_content_to_max_length() -> None:
