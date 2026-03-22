@@ -377,3 +377,63 @@ def test_acquire_message_throttle_blocks_second_attempt() -> None:
 
     assert first is True
     assert second is False
+
+
+def test_setup_topic_split_detects_different_short_topics() -> None:
+    assert facilitator._looks_like_setup_topic_split(
+        "Хотела бы обсудить тему детей.",
+        "Хочу поговорить о том, что мы почти не видимся.",
+    ) is True
+
+
+def test_setup_topic_split_ignores_same_topic_with_overlap() -> None:
+    assert facilitator._looks_like_setup_topic_split(
+        "Хочу обсудить тему детей.",
+        "Для меня тема детей сейчас самая важная.",
+    ) is False
+
+
+def test_collect_for_both_triggers_setup_topic_split_guard(monkeypatch) -> None:
+    class _ClaudeStub:
+        async def get_facilitator_response(self, *args, **kwargs):
+            raise AssertionError("Claude should not be called when setup topic split guard triggers")
+
+    monkeypatch.setattr(facilitator, "_claude", _ClaudeStub())
+
+    session = _session(waiting_for="BOTH", state="SETUP")
+    repo = _RepoStub()
+    bot = _BotStub()
+    first_message = _MessageStub(user_id=1)
+    second_message = _MessageStub(user_id=2)
+
+    asyncio.run(
+        facilitator._collect_for_both(
+            text="Хочу обсудить тему детей.",
+            relay_text="Хочу обсудить тему детей.",
+            message=first_message,
+            session=session,
+            sender_label="A",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+    asyncio.run(
+        facilitator._collect_for_both(
+            text="Хочу поговорить о том, что мы почти не видимся.",
+            relay_text="Хочу поговорить о том, что мы почти не видимся.",
+            message=second_message,
+            session=session,
+            sender_label="B",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+
+    assert first_message.answers == ["Принято. Жду ответа от второго партнёра."]
+    assert any("Похоже, сейчас звучат две разные темы." in text for _, text in bot.sent_messages)
+    assert session.waiting_for == "BOTH"
+    assert session.last_turn_summary == facilitator.SETUP_TOPIC_SPLIT_SUMMARY
+    assert repo.events[-1]["next_speaker"] == "BOTH"
+    assert repo.events[-1]["addressed_to"] == "BOTH"

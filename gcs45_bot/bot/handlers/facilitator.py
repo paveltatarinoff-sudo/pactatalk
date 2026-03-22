@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 import io
+import re
 from datetime import datetime
 
 from aiogram import Router, Bot, F
@@ -42,6 +43,34 @@ ADDRESS_FEEDBACK_PATTERNS = (
     "ты не меня спрашиваешь",
     "это я отвечаю",
 )
+SETUP_TOPIC_SPLIT_SUMMARY = "setup_topic_split_guard"
+SETUP_TOPIC_SPLIT_GENERIC_TOKENS = {
+    "хочу",
+    "хотел",
+    "хотела",
+    "хотим",
+    "обсудить",
+    "поговорить",
+    "разговор",
+    "разговора",
+    "тему",
+    "тема",
+    "темы",
+    "вопрос",
+    "вопроса",
+    "сейчас",
+    "важно",
+    "важнее",
+    "просто",
+    "этого",
+    "этой",
+    "этот",
+    "того",
+    "чтобы",
+    "который",
+    "которая",
+    "которые",
+}
 
 
 def _get_lock(session_id: str) -> asyncio.Lock:
@@ -133,6 +162,46 @@ def _align_next_speaker_with_reply(session: SessionState, reply: str, next_speak
 def _looks_like_address_feedback(message: str) -> bool:
     normalized = _normalize_text(message)
     return any(pattern in normalized for pattern in ADDRESS_FEEDBACK_PATTERNS)
+
+
+def _extract_topic_signal_tokens(text: str) -> set[str]:
+    normalized = _normalize_text(text)
+    tokens = re.findall(r"[a-zа-я0-9]+", normalized)
+    return {
+        token
+        for token in tokens
+        if len(token) >= 4 and token not in SETUP_TOPIC_SPLIT_GENERIC_TOKENS
+    }
+
+
+def _looks_like_setup_topic_split(text_a: str, text_b: str) -> bool:
+    normalized_a = _normalize_text(text_a)
+    normalized_b = _normalize_text(text_b)
+    if not normalized_a or not normalized_b:
+        return False
+    if len(normalized_a) > 120 or len(normalized_b) > 120:
+        return False
+
+    tokens_a = _extract_topic_signal_tokens(text_a)
+    tokens_b = _extract_topic_signal_tokens(text_b)
+    if not tokens_a or not tokens_b:
+        return False
+
+    families_a = {token[:3] for token in tokens_a}
+    families_b = {token[:3] for token in tokens_b}
+    if families_a & families_b:
+        return False
+
+    return True
+
+
+def _setup_topic_split_prompt() -> str:
+    return (
+        "Похоже, сейчас звучат две разные темы.\n\n"
+        "Прежде чем идти дальше, напишите каждый коротко: "
+        "<b>это одна общая тема с двух сторон или вам важно сначала выбрать одну тему?</b>\n"
+        "Отвечайте независимо — я жду ответа от вас обоих."
+    )
 
 
 def _speaker_signature(session: SessionState) -> str:
@@ -559,9 +628,44 @@ async def _collect_for_both(
                     session_id=session.session_id,
                     target_user_id=uid,
                 )
+    text_a = session.pending_a_message
+    text_b = session.pending_b_message
     session.pending_a_message = ""
     session.pending_b_message = ""
     await repo.save(session)
+
+    if (
+        session.dialogue_state == "SETUP"
+        and not session.last_turn_summary
+        and _looks_like_setup_topic_split(text_a, text_b)
+    ):
+        tokens_a = sorted(_extract_topic_signal_tokens(text_a))
+        tokens_b = sorted(_extract_topic_signal_tokens(text_b))
+        log.info(
+            "setup_topic_split_guard_triggered",
+            session_id=session.session_id,
+            topic_tokens_a=tokens_a,
+            topic_tokens_b=tokens_b,
+        )
+        _apply_next_speaker(session, "BOTH")
+        session.last_turn_summary = SETUP_TOPIC_SPLIT_SUMMARY
+        prompt = _setup_topic_split_prompt()
+        await repo.append_event(
+            session_id=session.session_id,
+            role="assistant",
+            speaker_label="BOT",
+            content=prompt,
+            dialogue_state_before=session.dialogue_state,
+            dialogue_state_after=session.dialogue_state,
+            waiting_for_before="BOTH",
+            waiting_for_after=session.waiting_for,
+            next_speaker="BOTH",
+            addressed_to="BOTH",
+            risk_flag=False,
+        )
+        await repo.save(session)
+        await _svc(bot, repo).notify_both(session, prompt, reply_markup=end_session_button())
+        return
 
     await bot.send_chat_action(message.chat.id, "typing")
     if partner_id:
