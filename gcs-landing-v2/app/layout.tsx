@@ -13,7 +13,7 @@ const rubik = Rubik({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://pactatalk.app"),
   title: "PACTA — AI-бот для сложных разговоров в паре",
   description:
     "PACTA — AI помогает парам проходить сложные разговоры в Telegram спокойнее, по очереди и без бесконечного хождения по кругу. Безопасное пространство для важного разговора.",
@@ -25,7 +25,7 @@ export const metadata: Metadata = {
     locale: "ru_RU",
     images: [
       {
-        url: "/landing/og-cover.png",
+        url: "/opengraph-image",
         width: 1200,
         height: 630,
         alt: "PACTA — AI",
@@ -36,7 +36,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "PACTA — AI-бот для сложных разговоров в паре",
     description: "Бот для пар, которым нужно обсудить важное без криков, перебиваний и хождения по кругу.",
-    images: ["/landing/og-cover.png"],
+    images: ["/twitter-image"],
   },
 };
 

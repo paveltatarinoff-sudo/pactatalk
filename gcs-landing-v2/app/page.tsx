@@ -30,18 +30,32 @@ const steps = [
   },
 ];
 
-const topics = ["Дети", "Деньги", "Дистанция", "Доверие", "Будущее", "Накопленные обиды"];
+const topics = [
+  "Дети",
+  "Деньги",
+  "Дистанция",
+  "Доверие",
+  "Будущее",
+  "Накопленные обиды",
+  "Ревность",
+  "Измена",
+  "Секс и близость",
+  "Родители и вмешательство семьи",
+  "Быт и распределение обязанностей",
+  "Поддержка и чувство одиночества в паре",
+  "Границы и личное пространство",
+];
 
 const trustPoints = [
   "Не терапия и не замена психолога",
-  "Можно остановиться в любой момент",
-  "Если разговор становится рискованным, бот не продолжает обычную сессию",
+  "Поддерживает структуру разговора шаг за шагом",
+  "Помогает прояснять позиции и двигаться к договорённостям",
 ];
 
 const heroTrustPoints = [
-  "Оба говорят по очереди, а не одновременно в хаосе",
-  "Разговор можно остановить в любой момент",
-  "Если сценарий становится рискованным, бот не ведёт обычную сессию дальше",
+  "Каждый получает пространство, чтобы быть услышанным и говорить без давления и защиты",
+  "PACTA ведёт разговор по структуре, чтобы он не развалился на полпути",
+  "Вместо ещё одного спора вы получаете больше ясности и следующий шаг",
 ];
 
 const faqs = [
@@ -86,24 +100,23 @@ function TelegramIcon({ className = "h-4 w-4" }: { className?: string }) {
 }
 
 function ChatAvatar({
-  label,
+  src,
   tone,
 }: {
-  label: string;
+  src: string;
   tone: "male" | "female";
 }) {
-  const toneClass =
-    tone === "male"
-      ? "bg-[linear-gradient(180deg,#d8e5f6,#b7cde7)] text-[#27405f]"
-      : "bg-[linear-gradient(180deg,#f4ded8,#efc1b4)] text-[#6e3d35]";
+  const ringClass = tone === "male" ? "ring-[#c6d9ef]" : "ring-[#f1cfc6]";
 
   return (
-    <div
-      className={`flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-bold shadow-[0_6px_14px_rgba(30,41,59,0.14)] ${toneClass}`}
+    <Image
+      src={src}
+      alt=""
+      width={32}
+      height={32}
+      className={`h-8 w-8 rounded-full object-cover ring-2 shadow-[0_6px_14px_rgba(30,41,59,0.14)] ${ringClass}`}
       aria-hidden="true"
-    >
-      {label}
-    </div>
+    />
   );
 }
 
@@ -209,7 +222,15 @@ export default function Home() {
       <section className="px-4 pb-8 pt-5 md:px-6 md:pb-12 md:pt-8">
         <div className="mx-auto max-w-6xl rounded-[2rem] border border-[var(--line)] bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,250,245,0.88))] px-5 py-5 md:px-8 md:py-8">
           <header className="mb-8 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Image
+                src="/landing/brand/logo-header.png"
+                alt="PACTA logo"
+                width={360}
+                height={240}
+                className="h-[5.8rem] w-auto object-contain md:h-[7.2rem]"
+                priority
+              />
               <div>
                 <div className="font-display text-4xl font-bold tracking-[-0.06em] text-[var(--surface-strong)] md:text-5xl">
                   PACTA — AI
@@ -232,11 +253,11 @@ export default function Home() {
 
           <div className="grid gap-8 lg:grid-cols-[1fr_0.88fr] lg:items-center">
             <div className="max-w-2xl">
-              <h1 className="font-display max-w-3xl text-[2.75rem] font-bold leading-[0.98] tracking-[-0.065em] text-[var(--surface-strong)] md:text-[4.6rem]">
+              <h1 className="font-display max-w-3xl text-[2.35rem] font-bold leading-[1] tracking-[-0.06em] text-[var(--surface-strong)] md:text-[4rem]">
                 Когда в паре пора обсудить важное, но самим удержать разговор уже не получается
               </h1>
-              <p className="mt-5 max-w-xl text-base leading-8 text-[var(--muted)] md:text-lg">
-                <BrandWord /> задаёт очередь, удерживает тему разговора и помогает дойти до следующего понятного шага, не скатываясь снова в тот же спор.
+              <p className="mt-5 max-w-2xl text-[1.05rem] leading-8 text-[var(--muted)] md:text-[1.22rem] md:leading-9">
+                <BrandWord /> — это AI-фасилитатор, который помогает парам проходить трудные разговоры по структуре, слышать друг друга, не терять суть и двигаться к большей ясности.
               </p>
               <div className="mt-7">
                 <CTAButtons />
@@ -281,7 +302,7 @@ export default function Home() {
                     <div className="telegram-bubble-user max-w-[72%] rounded-[1.2rem] rounded-br-md px-4 py-3">
                       Мы не можем спокойно обсудить тему детей.
                     </div>
-                    <ChatAvatar label="М" tone="male" />
+                    <ChatAvatar src="/landing/avatars/male.jpg" tone="male" />
                   </div>
                   <div className="flex items-end gap-2">
                     <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/92 text-sm font-bold text-[#2a7de1] shadow-[0_4px_10px_rgba(42,125,225,0.14)]">
@@ -292,7 +313,7 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="flex items-end gap-2">
-                    <ChatAvatar label="Ж" tone="female" />
+                    <ChatAvatar src="/landing/avatars/female.jpg" tone="female" />
                     <div className="telegram-bubble-user max-w-[72%] rounded-[1.2rem] rounded-bl-md px-4 py-3">
                       Для меня это про безопасность и уверенность.
                     </div>
@@ -301,7 +322,7 @@ export default function Home() {
                     <div className="telegram-bubble-user max-w-[74%] rounded-[1.2rem] rounded-br-md px-4 py-3">
                       А для меня — про то, что мы всё откладываем и отдаляемся.
                     </div>
-                    <ChatAvatar label="М" tone="male" />
+                    <ChatAvatar src="/landing/avatars/male.jpg" tone="male" />
                   </div>
                   <div className="flex items-end gap-2">
                     <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/92 text-sm font-bold text-[#2a7de1] shadow-[0_4px_10px_rgba(42,125,225,0.14)]">
