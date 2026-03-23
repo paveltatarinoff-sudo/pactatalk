@@ -26,7 +26,7 @@ from bot.services.resume_choice import (
 from bot.services.loop_guard import append_history_entry, maybe_build_loop_mode_shift
 from bot.services.session_service import SessionService
 from bot.services.shared import claude as _claude
-from bot.utils.keyboards import post_session_keyboard, end_session_keyboard, end_session_button, main_menu_keyboard
+from bot.utils.keyboards import post_session_keyboard, end_session_keyboard, main_menu_keyboard
 
 router = Router(name="facilitator")
 log = structlog.get_logger()
@@ -43,6 +43,44 @@ ADDRESS_FEEDBACK_PATTERNS = (
     "ты перепутал",
     "ты не меня спрашиваешь",
     "это я отвечаю",
+)
+END_SESSION_INTENT_PATTERNS = (
+    "завершить сессию",
+    "закончить сессию",
+    "закончим сессию",
+    "давай закончим",
+    "давайте закончим",
+    "пора закончить",
+    "остановимся",
+    "хочу закончить",
+    "хочу завершить",
+    "завершаем",
+    "на сегодня все",
+    "на сегодня всё",
+)
+END_SESSION_CONFIRM_YES_PATTERNS = (
+    "да",
+    "давай",
+    "да, давайте",
+    "да, завершаем",
+    "готов",
+    "готова",
+    "готовы",
+    "согласен",
+    "согласна",
+    "подтверждаю",
+)
+END_SESSION_CONFIRM_NO_PATTERNS = (
+    "нет",
+    "не надо",
+    "не сейчас",
+    "еще нет",
+    "ещё нет",
+    "давай продолжим",
+    "давайте продолжим",
+    "продолжим",
+    "не заканчиваем",
+    "не хочу заканчивать",
 )
 SETUP_TOPIC_SPLIT_SUMMARY = "setup_topic_split_guard"
 SETUP_TOPIC_SPLIT_GENERIC_TOKENS = {
@@ -219,11 +257,78 @@ def _reply_extras(session: SessionState) -> tuple[str, object]:
     """
     Возвращает (signature, keyboard) в зависимости от фазы сессии.
     - closing фаза → кнопка «Завершить сессию» + «Продолжить», без подписи
-    - обычная фаза → подпись + тихая кнопка завершения
+    - обычная фаза → только подпись без кнопки завершения
     """
     if session.phase == "closing":
         return "", end_session_keyboard()
-    return _speaker_signature(session), end_session_button()
+    return _speaker_signature(session), None
+
+
+def _looks_like_end_session_intent(message: str) -> bool:
+    normalized = _normalize_text(message)
+    return any(pattern in normalized for pattern in END_SESSION_INTENT_PATTERNS)
+
+
+def _looks_like_end_session_yes(message: str) -> bool:
+    normalized = _normalize_text(message)
+    return normalized in END_SESSION_CONFIRM_YES_PATTERNS
+
+
+def _looks_like_end_session_no(message: str) -> bool:
+    normalized = _normalize_text(message)
+    return normalized in END_SESSION_CONFIRM_NO_PATTERNS
+
+
+async def _request_end_session_confirmation(
+    *,
+    session: SessionState,
+    repo: SessionRepository,
+    bot: Bot,
+) -> None:
+    session.close_confirmation_pending = True
+    await repo.save(session)
+    await _svc(bot, repo).notify_both(
+        session,
+        "Похоже, вы хотите завершить сессию.\n\n"
+        "Готовы закончить разговор сейчас? Ответьте коротко: <b>да</b> или <b>нет</b>.",
+    )
+
+
+async def _resolve_end_session_confirmation(
+    *,
+    session: SessionState,
+    repo: SessionRepository,
+    bot: Bot,
+    user_id: int,
+    text: str,
+) -> bool:
+    if not session.close_confirmation_pending:
+        return False
+
+    if _looks_like_end_session_yes(text):
+        session.close_confirmation_pending = False
+        await repo.save(session)
+        await _svc(bot, repo).notify_both(
+            session,
+            "Если вы точно хотите закончить сессию, нажмите кнопку ниже.",
+            reply_markup=end_session_keyboard(),
+        )
+        return True
+
+    if _looks_like_end_session_no(text):
+        session.close_confirmation_pending = False
+        await repo.save(session)
+        await _svc(bot, repo).notify_both(
+            session,
+            "Понял. Сессию не завершаю, можно продолжать разговор.",
+        )
+        return True
+
+    await bot.send_message(
+        user_id,
+        "Если хотите завершить сессию, ответьте коротко: <b>да</b> или <b>нет</b>.",
+    )
+    return True
 
 
 async def _maybe_apply_loop_mode_shift(
@@ -297,7 +402,7 @@ def _regular_setup_intro() -> str:
         "Как это работает:\n"
         "• Пишешь сообщение или голосовое 🎤 — фасилитатор отвечает вам обоим\n"
         "• Говорит один, второй слушает — я слежу за очерёдностью\n"
-        "• Завершить сессию можно в любой момент кнопкой ниже\n\n"
+        "• Если захотите закончить сессию, просто напишите об этом в чат\n\n"
         "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
         "Напишите каждый своё: <b>что ты хочешь получить от этого разговора?</b>\n"
         "Отвечайте независимо — я жду ответа от вас обоих."
@@ -344,11 +449,11 @@ async def _handle_resume_alignment_text(
             session_id=session.session_id,
             resolution=resolution,
         )
-        await svc.notify_both(session, followup, reply_markup=end_session_button())
+        await svc.notify_both(session, followup)
         return
 
     log.info("resume_choice_alignment_retry", session_id=session.session_id)
-    await svc.notify_both(session, _resume_alignment_retry_intro(), reply_markup=end_session_button())
+    await svc.notify_both(session, _resume_alignment_retry_intro())
 
 
 async def _notify_admins_about_risk(bot: Bot, session: SessionState) -> None:
@@ -398,9 +503,20 @@ async def handle_session_message(
         return
     bound_log = log.bind(session_id=session.session_id, user_id=user_id, sender=sender_label)
 
-    # Триггер завершения сессии — от любого участника
-    if message.text and message.text.strip().lower() == "закончить сессию":
-        await message.answer("Вы хотите завершить сессию?", reply_markup=end_session_keyboard())
+    if message.text and session.close_confirmation_pending:
+        handled = await _resolve_end_session_confirmation(
+            session=session,
+            repo=repo,
+            bot=bot,
+            user_id=user_id,
+            text=message.text,
+        )
+        if handled:
+            return
+
+    # Триггер завершения сессии — от любого участника и вне очереди
+    if message.text and _looks_like_end_session_intent(message.text):
+        await _request_end_session_confirmation(session=session, repo=repo, bot=bot)
         return
     if message.text and len(message.text) > MAX_MESSAGE_LENGTH:
         await message.answer(
@@ -713,7 +829,7 @@ async def _collect_for_both(
             risk_flag=False,
         )
         await repo.save(session)
-        await _svc(bot, repo).notify_both(session, prompt, reply_markup=end_session_button())
+        await _svc(bot, repo).notify_both(session, prompt)
         return
 
     await bot.send_chat_action(message.chat.id, "typing")

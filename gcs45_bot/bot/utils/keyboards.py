@@ -2,6 +2,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
+from typing import Optional
 
 
 def main_menu_keyboard() -> InlineKeyboardMarkup:
@@ -26,11 +27,12 @@ def end_session_button() -> InlineKeyboardMarkup:
     ])
 
 
-def session_control_keyboard(speaker_turn: str = "", user_is_speaker: bool = False) -> InlineKeyboardMarkup:
+def session_control_keyboard(speaker_turn: str = "", user_is_speaker: bool = False) -> Optional[InlineKeyboardMarkup]:
     rows = []
     if user_is_speaker:
         rows.append([InlineKeyboardButton(text="➡️ Передать слово", callback_data="session:pass_turn")])
-    rows.append([InlineKeyboardButton(text="⏹ Завершить сессию", callback_data="session:end")])
+    if not rows:
+        return None
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

@@ -26,13 +26,12 @@ from bot.services.resume_choice import (
 )
 from bot.services.session_service import SessionService
 from bot.services.shared import claude as _claude
-from bot.handlers.facilitator import _release_lock
+from bot.handlers.facilitator import _release_lock, _request_end_session_confirmation
 from bot.utils.keyboards import (
     session_control_keyboard,
     post_session_keyboard,
     join_confirm_keyboard,
     main_menu_keyboard,
-    end_session_button,
     resume_confirmation_keyboard,
 )
 
@@ -91,7 +90,7 @@ def _regular_setup_intro() -> str:
         f"Как это работает:\n"
         f"• Пишешь сообщение или голосовое 🎤 — фасилитатор отвечает вам обоим\n"
         f"• Говорит один, второй слушает — я слежу за очерёдностью\n"
-        f"• Завершить сессию можно в любой момент кнопкой ниже\n\n"
+        f"• Если захотите закончить сессию, просто напишите об этом в чат\n\n"
         f"{_setup_question_block()}"
     )
 
@@ -432,7 +431,7 @@ async def cb_join_confirm(
         reply_markup = resume_confirmation_keyboard()
     else:
         common_intro = _regular_setup_intro()
-        reply_markup = end_session_button()
+        reply_markup = None
 
     m_a = await bot.send_message(session.user_a_id, common_intro, reply_markup=reply_markup)
     m_b = await bot.send_message(session.user_b_id, common_intro, reply_markup=reply_markup)
@@ -524,7 +523,7 @@ async def cb_resume_choice(
             resolution=resolution,
         )
         await _clear_resume_confirmation_buttons(session, bot)
-        await svc.notify_both(session, followup, reply_markup=end_session_button())
+        await svc.notify_both(session, followup)
         await callback.answer()
         return
 
@@ -536,7 +535,7 @@ async def cb_resume_choice(
         )
         await _clear_resume_confirmation_buttons(session, bot)
         await repo.save(session)
-        await svc.notify_both(session, _resume_alignment_intro(), reply_markup=end_session_button())
+        await svc.notify_both(session, _resume_alignment_intro())
         await callback.answer("Вы выбрали по-разному. Давайте коротко согласуем это текстом.")
         return
 
@@ -614,8 +613,24 @@ async def cb_pass_turn(
 
 
 
-@router.callback_query(F.data == "session:end")
 @router.message(Command("end_session"))
+async def cmd_end_session(
+    message: Message,
+    bot: Bot,
+    redis: Redis,
+    session_factory: async_sessionmaker,
+    state: FSMContext,
+) -> None:
+    repo = SessionRepository(redis, session_factory)
+    session = await repo.get_by_user(message.from_user.id)
+    if session is None:
+        await message.answer("Активной сессии нет.")
+        return
+
+    await _request_end_session_confirmation(session=session, repo=repo, bot=bot)
+
+
+@router.callback_query(F.data == "session:end")
 async def cb_end_session(
     event: Message | CallbackQuery,
     bot: Bot,
@@ -782,7 +797,16 @@ async def cb_delete_data(
 
 
 @router.callback_query(F.data == "session:continue")
-async def cb_continue_session(callback: CallbackQuery) -> None:
+async def cb_continue_session(callback: CallbackQuery, bot: Bot, redis: Redis, session_factory: async_sessionmaker) -> None:
+    repo = SessionRepository(redis, session_factory)
+    session = await repo.get_by_user(callback.from_user.id)
+    if session is not None and session.close_confirmation_pending:
+        session.close_confirmation_pending = False
+        await repo.save(session)
+        await SessionService(repo, bot).notify_both(
+            session,
+            "Понял. Сессию не завершаю, продолжаем разговор.",
+        )
     await callback.message.delete()
     await callback.answer()
 

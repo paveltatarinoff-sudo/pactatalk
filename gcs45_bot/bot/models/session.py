@@ -25,6 +25,7 @@ class SessionState:
     # SETUP | CLARIFY | DEESCALATE | DEEPEN | OPTIONS | AGREE | CHECK_IN
     dialogue_state: str = "SETUP"
     last_turn_summary: str = ""  # краткое резюме последнего хода для async context
+    close_confirmation_pending: bool = False
 
     # Режим и фаза
     mode: Literal["structured", "free", "pause", "closing"] = "structured"
