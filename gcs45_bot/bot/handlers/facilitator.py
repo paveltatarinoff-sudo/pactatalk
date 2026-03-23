@@ -23,6 +23,7 @@ from bot.services.resume_choice import (
     get_resume_resolution,
     process_alignment_reply,
 )
+from bot.services.loop_guard import append_history_entry, maybe_build_loop_mode_shift
 from bot.services.session_service import SessionService
 from bot.services.shared import claude as _claude
 from bot.utils.keyboards import post_session_keyboard, end_session_keyboard, end_session_button, main_menu_keyboard
@@ -223,6 +224,54 @@ def _reply_extras(session: SessionState) -> tuple[str, object]:
     if session.phase == "closing":
         return "", end_session_keyboard()
     return _speaker_signature(session), end_session_button()
+
+
+async def _maybe_apply_loop_mode_shift(
+    *,
+    session: SessionState,
+    repo: SessionRepository,
+    text: str,
+    sender_label: str,
+) -> tuple[str, bool, str, dict[str, str | bool]] | None:
+    if not hasattr(repo, "get_history") or not hasattr(repo, "save_history"):
+        return None
+
+    history = await repo.get_history(session.session_id)
+    history_with_user = append_history_entry(
+        history,
+        role="user",
+        content=f"[{sender_label}]: {text}",
+    )
+    mode_shift = maybe_build_loop_mode_shift(session, history_with_user)
+    if mode_shift is None:
+        return None
+
+    await repo.save_history(
+        session.session_id,
+        append_history_entry(history_with_user, role="assistant", content=mode_shift.reply),
+    )
+    session.last_turn_summary = mode_shift.reply[:150].strip()
+    log.info(
+        "loop_mode_shift_triggered",
+        session_id=session.session_id,
+        dialogue_state=session.dialogue_state,
+        sender_label=sender_label,
+        reason=mode_shift.reason,
+    )
+    return (
+        mode_shift.reply,
+        False,
+        mode_shift.next_speaker,
+        {
+            "addressed_to": mode_shift.addressed_to,
+            "next_speaker": mode_shift.next_speaker,
+            "next_state": session.dialogue_state,
+            "dialogue_state_before": session.dialogue_state,
+            "dialogue_state_after": session.dialogue_state,
+            "waiting_for_before": session.waiting_for,
+            "risk_flag": False,
+        },
+    )
 
 
 def _resume_continue_intro() -> str:
@@ -805,24 +854,33 @@ async def _process_turn(
         await bot.send_chat_action(partner_id, "typing")
 
     address_feedback = _looks_like_address_feedback(text)
+    loop_mode_shift_response = await _maybe_apply_loop_mode_shift(
+        session=session,
+        repo=repo,
+        text=text,
+        sender_label=sender_label,
+    )
 
-    try:
-        reply, risk_detected, next_speaker, response_meta = await _claude.get_facilitator_response(
-            session,
-            text,
-            sender_name,
-            repo,
-            address_feedback=address_feedback,
-            feedback_target=sender_label,
-        )
-    except OpenAIServiceError as exc:
-        log.warning("facilitator_api_error", session_id=session.session_id, mode="single", error=str(exc))
-        await message.answer(exc.user_message)
-        return
-    except Exception:
-        log.exception("facilitator_unexpected_error", session_id=session.session_id, mode="single")
-        await message.answer("Не удалось получить ответ фасилитатора. Попробуй ещё раз.")
-        return
+    if loop_mode_shift_response is not None:
+        reply, risk_detected, next_speaker, response_meta = loop_mode_shift_response
+    else:
+        try:
+            reply, risk_detected, next_speaker, response_meta = await _claude.get_facilitator_response(
+                session,
+                text,
+                sender_name,
+                repo,
+                address_feedback=address_feedback,
+                feedback_target=sender_label,
+            )
+        except OpenAIServiceError as exc:
+            log.warning("facilitator_api_error", session_id=session.session_id, mode="single", error=str(exc))
+            await message.answer(exc.user_message)
+            return
+        except Exception:
+            log.exception("facilitator_unexpected_error", session_id=session.session_id, mode="single")
+            await message.answer("Не удалось получить ответ фасилитатора. Попробуй ещё раз.")
+            return
 
     if risk_detected:
         session.risk_flag = True
