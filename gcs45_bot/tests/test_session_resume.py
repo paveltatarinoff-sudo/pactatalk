@@ -9,6 +9,7 @@ from bot.handlers.session import _apply_resume_resolution
 from bot.services.resume_choice import (
     RESUME_CHOICE_ALIGNMENT_PENDING,
     RESUME_CHOICE_CONTINUE,
+    RESUME_CHOICE_FLEXIBLE,
     RESUME_CHOICE_NEW_TOPIC,
     classify_resume_resolution_text,
     decide_resume_resolution,
@@ -43,6 +44,21 @@ SAMPLE_RESUME = (
     "Позиция Lyuda: ей нужно больше совместного времени.\n"
     "Где остановились: обсуждали конкретную ситуацию — вечер вторника.\n"
     "Что осталось недосказанным: Pasha не успел рассказать, что чувствует когда Lyuda уходит.\n"
+    "Состояние: DEEPEN"
+)
+
+SAMPLE_RESUME_NO_STOPPING_POINT = (
+    "Тема: Нехватка внимания и близости.\n"
+    "Позиция Pasha: ему важно чувствовать, что его ценят и замечают.\n"
+    "Позиция Lyuda: ей нужно больше совместного времени.\n"
+    "Что осталось недосказанным: Pasha не успел рассказать, что чувствует когда Lyuda уходит.\n"
+    "Состояние: DEEPEN"
+)
+
+SAMPLE_RESUME_UNSTRUCTURED = (
+    "Тема: Нехватка внимания и близости.\n"
+    "Позиция Pasha: ему важно чувствовать, что его ценят и замечают.\n"
+    "Позиция Lyuda: ей нужно больше совместного времени.\n"
     "Состояние: DEEPEN"
 )
 
@@ -238,13 +254,29 @@ class TestResumeConfirmationChoice:
 
         assert session.resume_context == SAMPLE_RESUME
         assert "Продолжим прошлую тему" in message
+        assert "вечер вторника" in message
+        assert "что вам хочется сказать именно отсюда" in message
+
+    def test_continue_falls_back_to_unresolved_when_no_stopping_point(self) -> None:
+        session = _session(state="SETUP", resume_context=SAMPLE_RESUME_NO_STOPPING_POINT)
+        message = _apply_resume_resolution(session, RESUME_CHOICE_CONTINUE)
+
+        assert "осталось что-то важное" in message
+        assert "что вам хочется договорить или прояснить сначала" in message
+        assert "Pasha не успел рассказать" in message
+
+    def test_continue_uses_plain_fallback_without_resume_fields(self) -> None:
+        session = _session(state="SETUP", resume_context=SAMPLE_RESUME_UNSTRUCTURED)
+        message = _apply_resume_resolution(session, RESUME_CHOICE_CONTINUE)
+
+        assert "с какого места вам лучше продолжить этот разговор" in message
 
     def test_new_topic_clears_resume(self) -> None:
         session = _session(state="SETUP", resume_context=SAMPLE_RESUME)
         message = _apply_resume_resolution(session, RESUME_CHOICE_NEW_TOPIC)
 
         assert session.resume_context == ""
-        assert "что ты хочешь получить от этого разговора" in message
+        assert "с какой темы вам важнее всего начать сегодня" in message
 
     def test_stale_not_accurate_maps_to_new_topic(self) -> None:
         assert normalize_resume_choice("session:resume_not_accurate") == RESUME_CHOICE_NEW_TOPIC
@@ -397,8 +429,8 @@ class TestResumeAlignmentResolution:
             )
         )
 
-        assert first == ("waiting", None)
-        assert second == ("resolved", RESUME_CHOICE_CONTINUE)
+        assert first == ("waiting", None, None, None)
+        assert second == ("resolved", RESUME_CHOICE_CONTINUE, RESUME_CHOICE_CONTINUE, RESUME_CHOICE_CONTINUE)
         assert asyncio.run(get_resume_resolution(redis, "session-1")) == RESUME_CHOICE_CONTINUE
 
     def test_alignment_text_resolves_new_topic(self) -> None:
@@ -426,8 +458,66 @@ class TestResumeAlignmentResolution:
             )
         )
 
-        assert result == ("resolved", RESUME_CHOICE_NEW_TOPIC)
+        assert result == ("resolved", RESUME_CHOICE_NEW_TOPIC, RESUME_CHOICE_NEW_TOPIC, RESUME_CHOICE_NEW_TOPIC)
         assert asyncio.run(get_resume_resolution(redis, "session-1")) == RESUME_CHOICE_NEW_TOPIC
+
+    def test_alignment_text_resolves_when_one_partner_is_flexible(self) -> None:
+        redis = _RedisChoiceStub()
+        asyncio.run(redis.set("resume_resolution:session-1", RESUME_CHOICE_ALIGNMENT_PENDING))
+
+        asyncio.run(
+            process_alignment_reply(
+                redis,
+                session_id="session-1",
+                user_id=100,
+                user_a_id=100,
+                user_b_id=200,
+                text="Мне без разницы, можно любой вариант.",
+            )
+        )
+        result = asyncio.run(
+            process_alignment_reply(
+                redis,
+                session_id="session-1",
+                user_id=200,
+                user_a_id=100,
+                user_b_id=200,
+                text="Я бы хотел начать новую тему.",
+            )
+        )
+
+        assert result == ("resolved", RESUME_CHOICE_NEW_TOPIC, RESUME_CHOICE_FLEXIBLE, RESUME_CHOICE_NEW_TOPIC)
+        assert asyncio.run(get_resume_resolution(redis, "session-1")) == RESUME_CHOICE_NEW_TOPIC
+
+    def test_alignment_text_resolves_both_flexible_by_default(self) -> None:
+        redis = _RedisChoiceStub()
+        asyncio.run(redis.set("resume_resolution:session-1", RESUME_CHOICE_ALIGNMENT_PENDING))
+
+        asyncio.run(
+            process_alignment_reply(
+                redis,
+                session_id="session-1",
+                user_id=100,
+                user_a_id=100,
+                user_b_id=200,
+                text="Мне без разницы.",
+                default_resolution=RESUME_CHOICE_CONTINUE,
+            )
+        )
+        result = asyncio.run(
+            process_alignment_reply(
+                redis,
+                session_id="session-1",
+                user_id=200,
+                user_a_id=100,
+                user_b_id=200,
+                text="Мне тоже ок любой вариант.",
+                default_resolution=RESUME_CHOICE_CONTINUE,
+            )
+        )
+
+        assert result == ("resolved", RESUME_CHOICE_CONTINUE, RESUME_CHOICE_FLEXIBLE, RESUME_CHOICE_FLEXIBLE)
+        assert asyncio.run(get_resume_resolution(redis, "session-1")) == RESUME_CHOICE_CONTINUE
 
     def test_alignment_text_retry_when_answers_do_not_converge(self) -> None:
         redis = _RedisChoiceStub()
@@ -454,7 +544,7 @@ class TestResumeAlignmentResolution:
             )
         )
 
-        assert result == ("retry", None)
+        assert result == ("retry", None, RESUME_CHOICE_CONTINUE, None)
         assert asyncio.run(get_resume_resolution(redis, "session-1")) == RESUME_CHOICE_ALIGNMENT_PENDING
 
 
@@ -465,5 +555,14 @@ class TestResumeTextClassification:
     def test_new_topic_markers_detected(self) -> None:
         assert classify_resume_resolution_text("Давай начнем новую тему") == RESUME_CHOICE_NEW_TOPIC
 
+    def test_flexible_markers_detected(self) -> None:
+        assert classify_resume_resolution_text("Мне без разницы, можно любой вариант") == RESUME_CHOICE_FLEXIBLE
+
     def test_pair_decision_requires_same_direction(self) -> None:
         assert decide_resume_resolution("Продолжим с этого места", "Начнем новую тему") is None
+
+    def test_pair_decision_accepts_flexible_partner(self) -> None:
+        assert decide_resume_resolution(
+            "Мне без разницы, можно любой вариант",
+            "Начнем новую тему",
+        ) == RESUME_CHOICE_NEW_TOPIC

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
@@ -13,6 +14,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 import structlog
 
 from bot.fsm.states import UserFlow, SessionFlow
+from bot.config import settings
+from bot.handlers.privacy import send_data_dashboard
 from bot.models.session import SessionState
 from bot.repositories.session_repo import SessionRepository
 from bot.services.resume_choice import (
@@ -25,22 +28,118 @@ from bot.services.resume_choice import (
     reset_resume_choice_state,
 )
 from bot.services.session_service import SessionService
+from bot.services.session_service import format_bot_dialog_message
 from bot.services.shared import claude as _claude
-from bot.handlers.facilitator import _release_lock, _request_end_session_confirmation
+from bot.handlers.menu import decode_summary_meta, encode_summary_meta
+from bot.handlers.facilitator import (
+    _clear_end_session_choice_buttons,
+    _present_end_session_choice,
+    _release_lock,
+)
 from bot.utils.keyboards import (
+    data_actions_keyboard,
     session_control_keyboard,
-    post_session_keyboard,
     join_confirm_keyboard,
     main_menu_keyboard,
+    post_session_keyboard,
     resume_confirmation_keyboard,
 )
 
 router = Router(name="session")
 log = structlog.get_logger()
 
+JOIN_TARGET_USE_EXISTING = "use_existing"
+JOIN_TARGET_JOIN = "join"
+JOIN_TARGET_INVALID = "invalid"
+JOIN_TARGET_SELF = "self"
+JOIN_TARGET_BLOCK_ACTIVE = "block_active"
+
 
 def _make_service(bot: Bot, redis: Redis, session_factory: Optional[async_sessionmaker] = None) -> SessionService:
     return SessionService(SessionRepository(redis, session_factory), bot)
+
+
+async def _safe_answer_callback(callback: CallbackQuery) -> None:
+    try:
+        await callback.answer()
+    except Exception:
+        log.warning(
+            "callback_answer_failed",
+            user_id=callback.from_user.id,
+            callback_data=callback.data,
+        )
+
+
+async def _delete_or_clear_callback_message(callback: CallbackQuery) -> None:
+    if callback.message is None:
+        return
+    try:
+        await callback.message.delete()
+        return
+    except Exception:
+        pass
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        log.warning(
+            "callback_menu_cleanup_failed",
+            user_id=callback.from_user.id,
+            callback_data=callback.data,
+            message_id=getattr(callback.message, "message_id", 0),
+        )
+
+
+def _is_orphan_waiting_session(session: SessionState, user_id: int) -> bool:
+    return session.user_a_id == user_id and session.user_b_id == 0
+
+
+async def _resolve_join_target(
+    repo: SessionRepository,
+    *,
+    user_id: int,
+    code: str,
+) -> tuple[str, Optional[SessionState], Optional[SessionState]]:
+    normalized_code = code.upper()
+    existing = await repo.get_by_user(user_id)
+
+    if (
+        existing is not None
+        and (existing.invite_code or "").upper() == normalized_code
+        and existing.user_b_id == user_id
+    ):
+        return JOIN_TARGET_USE_EXISTING, existing, None
+
+    target = await repo.get_by_invite(normalized_code)
+    if target is None:
+        return JOIN_TARGET_INVALID, None, None
+
+    if target.user_a_id == user_id:
+        return JOIN_TARGET_SELF, None, None
+
+    if existing is None:
+        return JOIN_TARGET_JOIN, target, None
+
+    if existing.session_id == target.session_id:
+        return JOIN_TARGET_USE_EXISTING, existing, None
+
+    if _is_orphan_waiting_session(existing, user_id):
+        return JOIN_TARGET_JOIN, target, existing
+
+    return JOIN_TARGET_BLOCK_ACTIVE, None, existing
+
+
+async def _cleanup_orphan_waiting_session(
+    repo: SessionRepository,
+    state: FSMContext,
+    session: SessionState,
+) -> None:
+    log.info(
+        "join_replaces_orphan_waiting_session",
+        session_id=session.session_id,
+        user_id=session.user_a_id,
+    )
+    await repo.delete_session_artifacts(session.session_id)
+    await state.clear()
 
 
 async def _clear_resume_confirmation_buttons(session: SessionState, bot: Bot) -> None:
@@ -78,19 +177,28 @@ async def _clear_single_resume_button(callback: CallbackQuery, session_id: str) 
 
 def _setup_question_block() -> str:
     return (
-        f"<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
-        f"Напишите каждый своё: <b>что ты хочешь получить от этого разговора?</b>\n"
-        f"Отвечайте независимо — я жду ответа от вас обоих."
+        "Первый вопрос к каждому из вас:\n"
+        "с какой темы вам важнее всего начать сегодня?"
     )
 
 
 def _regular_setup_intro() -> str:
     return (
-        f"Давайте начнём. Я здесь, чтобы помочь вам услышать друг друга.\n\n"
-        f"Как это работает:\n"
-        f"• Пишешь сообщение или голосовое 🎤 — фасилитатор отвечает вам обоим\n"
-        f"• Говорит один, второй слушает — я слежу за очерёдностью\n"
-        f"• Если захотите закончить сессию, просто напишите об этом в чат\n\n"
+        "Вы оба в сессии. Начинаем.\n\n"
+        "Я помогу вам провести этот разговор более спокойно, ясно и по очереди. "
+        "Буду удерживать фокус, задавать вопросы, помогать распаковывать сложные чувства "
+        "и переводить разговор к лучшему пониманию и возможным договорённостям.\n\n"
+        "Во время сессии я могу:\n"
+        "• задавать вопросы вам обоим и каждому лично;\n"
+        "• помогать точнее назвать, что вы чувствуете и что хотите донести;\n"
+        "• объяснять напряжённые или сложные моменты простым языком;\n"
+        "• предлагать более удачные формулировки и направления разговора;\n"
+        "• опираться на сильные подходы фасилитации и коммуникации.\n\n"
+        "Вы можете:\n"
+        "• отвечать текстом или голосом;\n"
+        "• задавать мне вопросы;\n"
+        "• поправлять меня, если я неточен;\n"
+        "• в любой момент написать, что хотите завершить сессию, или сделать это через меню Telegram.\n\n"
         f"{_setup_question_block()}"
     )
 
@@ -107,11 +215,52 @@ def _resume_confirmation_intro(session: SessionState) -> str:
     )
 
 
-def _resume_continue_intro() -> str:
+def _extract_resume_field(resume_context: str, field_name: str) -> str:
+    prefix = f"{field_name}:"
+    for raw_line in resume_context.splitlines():
+        line = raw_line.strip()
+        if line.lower().startswith(prefix.lower()):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def _has_meaningful_resume_field(value: str) -> bool:
+    normalized = value.strip().strip(".")
+    if not normalized:
+        return False
+    return normalized.lower() not in {"нет", "не указано", "-", "—", "n/a"}
+
+
+def _resume_continue_intro(session: SessionState) -> str:
+    stopping_point = _extract_resume_field(session.resume_context, "Где остановились")
+    unresolved = _extract_resume_field(session.resume_context, "Что осталось недосказанным")
+
+    if _has_meaningful_resume_field(stopping_point):
+        safe_stopping_point = html.escape(stopping_point)
+        return (
+            "Продолжим прошлую тему.\n\n"
+            "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+            "В прошлый раз вы остановились вот здесь:\n"
+            f"<blockquote>{safe_stopping_point}</blockquote>\n\n"
+            "Напишите каждый коротко: <b>что вам хочется сказать именно отсюда?</b>\n"
+            "Отвечайте независимо — я жду ответа от вас обоих."
+        )
+
+    if _has_meaningful_resume_field(unresolved):
+        safe_unresolved = html.escape(unresolved)
+        return (
+            "Продолжим прошлую тему.\n\n"
+            "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+            "Похоже, в прошлый раз здесь осталось что-то важное:\n"
+            f"<blockquote>{safe_unresolved}</blockquote>\n\n"
+            "Напишите каждый коротко: <b>что вам хочется договорить или прояснить сначала?</b>\n"
+            "Отвечайте независимо — я жду ответа от вас обоих."
+        )
+
     return (
         "Продолжим прошлую тему.\n\n"
         "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
-        "Напишите каждый коротко: <b>что в этой теме сейчас для вас самое живое или важное?</b>\n"
+        "Напишите каждый коротко: <b>с какого места вам лучше продолжить этот разговор?</b>\n"
         "Отвечайте независимо — я жду ответа от вас обоих."
     )
 
@@ -119,25 +268,57 @@ def _resume_continue_intro() -> str:
 def _resume_alignment_intro() -> str:
     return (
         "Вы выбрали по-разному: один хочет продолжить прошлую тему, другой — начать новую.\n\n"
-        "Напишите каждый одним-двумя предложениями: <b>вам сейчас важнее продолжить прошлую тему "
-        "или начать новую — и почему?</b>\n"
+        "Напишите каждый одним-двумя предложениями: <b>вам сейчас важнее продолжить прошлую тему, "
+        "начать новую или вам ок любой вариант — и почему?</b>\n"
         "Отвечайте независимо — я подожду ответы от вас обоих."
+    )
+
+
+def _build_post_session_survey_url(base_url: str, *, session_id: str, role: str) -> str:
+    if not base_url:
+        return ""
+
+    parsed = urlsplit(base_url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.update(
+        {
+            "session_id": session_id,
+            "role": role,
+            "source": "telegram_post_session",
+        }
+    )
+    return urlunsplit(parsed._replace(query=urlencode(query)))
+
+
+def _post_session_summary_text(summary_text: str, *, has_survey: bool) -> str:
+    survey_block = ""
+    if has_survey:
+        survey_block = (
+            "\n\nЕсли захочешь помочь улучшить PactaTalk, "
+            "ответь на 6 коротких вопросов ниже. Это займёт около 2 минут."
+        )
+
+    return (
+        f"Сессия завершена.\n\n"
+        f"📋 <b>Краткий итог разговора</b>\n\n"
+        f"{html.escape(summary_text or 'Итог разговора сохранён.')}\n\n"
+        f"Итог уже сохранён в разделе <b>«Мои итоги»</b>."
+        f"{survey_block}"
     )
 
 
 def _resume_alignment_retry_intro() -> str:
     return (
-        "Пока я не вижу общего решения.\n\n"
-        "Напишите ещё раз коротко и прямо: <b>продолжить прошлую тему</b> или "
-        "<b>начать новую</b>."
+        "Пока у вас не сложилось общее решение.\n\n"
+        "Напишите ещё раз коротко и прямо одним из вариантов: "
+        "<b>продолжить прошлую тему</b>, <b>начать новую</b> или "
+        "<b>мне ок любой вариант</b>."
     )
 
 
 def _apply_resume_resolution(session: SessionState, resolution: str) -> str:
     if resolution == RESUME_CHOICE_CONTINUE:
-        return (
-            _resume_continue_intro()
-        )
+        return _resume_continue_intro(session)
 
     session.resume_context = ""
     return _regular_setup_intro()
@@ -155,49 +336,63 @@ async def cmd_new_session(
     state: FSMContext,
 ) -> None:
     msg = event if isinstance(event, Message) else event.message
+    if msg is None:
+        return
+
     user_id = event.from_user.id
 
-    svc = _make_service(bot, redis, session_factory)
+    repo = SessionRepository(redis, session_factory)
+    svc = SessionService(repo, bot)
+
+    if isinstance(event, CallbackQuery):
+        await _safe_answer_callback(event)
+        await _delete_or_clear_callback_message(event)
 
     # Атомарная блокировка — защита от гонки при двойном нажатии
     lock_key = f"lock:create_session:{user_id}"
     acquired = await redis.set(lock_key, "1", nx=True, ex=5)
     if not acquired:
-        if isinstance(event, CallbackQuery):
-            await event.answer()
         return
 
-    # Проверить нет ли уже активной сессии
-    existing = await svc.get_user_session(user_id)
-    if existing is not None:
+    try:
+        # Проверить нет ли уже активной сессии
+        existing = await svc.get_user_session(user_id)
+        if existing is not None:
+            await msg.answer("У тебя уже есть активная сессия. Используй /status или /end_session.")
+            return
+
+        session = await svc.create_session(user_id)
+        log.info("session_created", session_id=session.session_id, user_id=user_id)
+
+        try:
+            bot_info = await bot.get_me()
+            invite_link = f"https://t.me/{bot_info.username}?start=join_{session.invite_code}"
+
+            await msg.answer("Перешли следующее сообщение партнёру 👇")
+            await msg.answer(
+                f"<b>Вас пригласили в диалог в PactaTalk</b>\n\n"
+                f"PactaTalk помогает парам спокойно обсуждать сложные темы шаг за шагом.\n"
+                f"Это не терапия, а инструмент для бережного диалога.\n\n"
+                f"Если вам подходит такой формат, присоединяйтесь к сессии.\n\n"
+                f"{invite_link}"
+            )
+        except Exception:
+            log.exception(
+                "session_invite_delivery_failed",
+                session_id=session.session_id,
+                user_id=user_id,
+            )
+            await repo.delete_session_artifacts(session.session_id)
+            await state.clear()
+            await msg.answer(
+                "Не удалось создать сессию из-за временной ошибки. Попробуй ещё раз через несколько секунд."
+            )
+            return
+
+        await state.set_state(SessionFlow.waiting_partner)
+        await state.update_data(session_id=session.session_id)
+    finally:
         await redis.delete(lock_key)
-        await msg.answer("У тебя уже есть активная сессия. Используй /status или /end_session.")
-        if isinstance(event, CallbackQuery):
-            await event.answer()
-        return
-
-    session = await svc.create_session(user_id)
-    log.info("session_created", session_id=session.session_id, user_id=user_id)
-    await redis.delete(lock_key)
-    await state.set_state(SessionFlow.waiting_partner)
-    await state.update_data(session_id=session.session_id)
-
-    bot_info = await bot.get_me()
-    invite_link = f"https://t.me/{bot_info.username}?start=join_{session.invite_code}"
-    inviter_name = html.escape(event.from_user.first_name or "Партнёр")
-
-    await msg.answer("Перешли следующее сообщение партнёру 👇")
-    await msg.answer(
-        f"💬 <b>{inviter_name} приглашает тебя на совместную сессию в PactaTalk</b>\n\n"
-        f"PactaTalk — это пространство для честного и бережного разговора. "
-        f"AI-фасилитатор поможет нам услышать друг друга, соблюсти очерёдность "
-        f"и прийти к договорённости.\n\n"
-        f"Нажми на ссылку чтобы присоединиться:\n"
-        f"{invite_link}"
-    )
-
-    if isinstance(event, CallbackQuery):
-        await event.answer()
 
 
 # ─── /join ───────────────────────────────────────────────────────────────────
@@ -214,6 +409,9 @@ async def cmd_join(
     msg = event if isinstance(event, Message) else event.message
     user_id = event.from_user.id
 
+    if isinstance(event, CallbackQuery):
+        await _safe_answer_callback(event)
+
     # Извлечь код из команды: /join XXXXXX
     code = None
     if isinstance(event, Message) and event.text:
@@ -223,14 +421,12 @@ async def cmd_join(
 
     if not code:
         await state.set_state(UserFlow.joining)
-        await msg.answer("Введи инвайт-код от партнёра:")
         if isinstance(event, CallbackQuery):
-            await event.answer()
+            await _delete_or_clear_callback_message(event)
+        await msg.answer("Введи инвайт-код от партнёра:")
         return
 
     await _process_join(msg, user_id, code, bot, redis, session_factory, state)
-    if isinstance(event, CallbackQuery):
-        await event.answer()
 
 
 @router.message(UserFlow.joining)
@@ -257,12 +453,9 @@ async def _process_join(
     session_factory: async_sessionmaker,
     state: FSMContext,
 ) -> None:
-    svc = _make_service(bot, redis, session_factory)
-
-    existing = await svc.get_user_session(user_id)
-    if existing is not None:
-        await msg.answer("У тебя уже есть активная сессия. Используй /status или /end_session.")
-        return
+    code = code.upper()
+    repo = SessionRepository(redis, session_factory)
+    svc = SessionService(repo, bot)
 
     # Атомарная блокировка invite-кода — защита от двойного join с одним кодом
     lock_key = f"lock:join:{code}"
@@ -271,15 +464,43 @@ async def _process_join(
         await msg.answer("Этот код уже используется. Попробуй через несколько секунд.")
         return
 
-    session = await svc.join_session(user_id, code)
-    await redis.delete(lock_key)
+    cleanup_notice = ""
+    try:
+        action, _, orphan_session = await _resolve_join_target(repo, user_id=user_id, code=code)
+        if action == JOIN_TARGET_INVALID:
+            await msg.answer(
+                "Код не найден или уже использован.\n"
+                "Проверь код и попробуй снова, или попроси партнёра создать новую сессию."
+            )
+            return
 
-    if session is None:
-        await msg.answer(
-            "Код не найден или уже использован.\n"
-            "Проверь код и попробуй снова, или попроси партнёра создать новую сессию."
-        )
-        return
+        if action == JOIN_TARGET_SELF:
+            await msg.answer("Это твоя собственная сессия. Перешли приглашение партнёру.")
+            return
+
+        if action == JOIN_TARGET_BLOCK_ACTIVE:
+            await msg.answer(
+                "У тебя уже есть другая активная сессия. Сначала заверши её через /status или /end_session."
+            )
+            return
+
+        if orphan_session is not None:
+            await _cleanup_orphan_waiting_session(repo, state, orphan_session)
+            cleanup_notice = (
+                "У тебя была незавершённая сессия ожидания. "
+                "Я закрыл её и присоединил тебя к приглашению партнёра.\n\n"
+            )
+
+        session = await svc.join_session(user_id, code)
+        if session is None:
+            await msg.answer(
+                "Код не найден или уже использован.\n"
+                "Проверь код и попробуй снова, или попроси партнёра создать новую сессию."
+            )
+            return
+    finally:
+        await redis.delete(lock_key)
+
     log.info("session_joined", session_id=session.session_id, user_id=user_id)
 
     await state.set_state(SessionFlow.opening)
@@ -314,6 +535,7 @@ async def _process_join(
 
     # Уведомить B
     await msg.answer(
+        f"{cleanup_notice}"
         f"Отлично! Ты присоединился к сессии с {partner_name}.\n\n"
         f"Нажми кнопку ниже чтобы подтвердить — и мы начнём.",
         reply_markup=join_confirm_keyboard(code),
@@ -344,18 +566,56 @@ async def cb_join_confirm(
     state: FSMContext,
 ) -> None:
     user_id = callback.from_user.id
-    svc = _make_service(bot, redis, session_factory)
+    code = callback.data.split(":")[-1].upper()
+    repo = SessionRepository(redis, session_factory)
+    svc = SessionService(repo, bot)
 
-    # Пробуем найти уже присоединённую сессию
-    session = await svc.get_user_session(user_id)
+    lock_key = f"lock:join:{code}"
+    acquired = await redis.set(lock_key, "1", nx=True, ex=10)
+    if not acquired:
+        await callback.answer("Этот код уже используется. Попробуй через несколько секунд.", show_alert=True)
+        return
 
-    if session is None:
-        # Партнёр пришёл по deep link — ещё не присоединился, делаем это сейчас
-        code = callback.data.split(":")[-1]
-        session = await svc.join_session(user_id, code)
-        if session is None:
+    try:
+        action, existing_session, orphan_session = await _resolve_join_target(repo, user_id=user_id, code=code)
+        if action == JOIN_TARGET_INVALID:
             await callback.answer("Сессия не найдена или код истёк.", show_alert=True)
             return
+
+        if action == JOIN_TARGET_SELF:
+            await callback.answer("Это твоя сессия. Перешли приглашение партнёру.", show_alert=True)
+            return
+
+        if action == JOIN_TARGET_BLOCK_ACTIVE:
+            await callback.answer(
+                "У тебя уже есть другая активная сессия. Сначала заверши её через /end_session.",
+                show_alert=True,
+            )
+            return
+
+        await _safe_answer_callback(callback)
+        await _delete_or_clear_callback_message(callback)
+
+        if orphan_session is not None:
+            await _cleanup_orphan_waiting_session(repo, state, orphan_session)
+            if callback.message is not None:
+                await callback.message.answer(
+                    "У тебя была незавершённая сессия ожидания. "
+                    "Я закрыл её и присоединил тебя к приглашению партнёра."
+                )
+
+        if action == JOIN_TARGET_USE_EXISTING:
+            session = existing_session
+        else:
+            session = await svc.join_session(user_id, code)
+            if session is None:
+                if callback.message is not None:
+                    await callback.message.answer(
+                        "Код не найден или уже использован. Попроси партнёра создать новую сессию."
+                    )
+                return
+    finally:
+        await redis.delete(lock_key)
 
     # Сохраняем имена участников (BUG-011: защита от ошибок get_chat)
     try:
@@ -380,8 +640,6 @@ async def cb_join_confirm(
             user_id=user_id,
         )
         session.name_b = "Партнёр B"
-
-    repo = SessionRepository(redis, session_factory)
 
     # Load resume from previous session (P3.1)
     try:
@@ -433,14 +691,13 @@ async def cb_join_confirm(
         common_intro = _regular_setup_intro()
         reply_markup = None
 
-    m_a = await bot.send_message(session.user_a_id, common_intro, reply_markup=reply_markup)
-    m_b = await bot.send_message(session.user_b_id, common_intro, reply_markup=reply_markup)
+    intro_message = format_bot_dialog_message(common_intro)
+    m_a = await bot.send_message(session.user_a_id, intro_message, reply_markup=reply_markup)
+    m_b = await bot.send_message(session.user_b_id, intro_message, reply_markup=reply_markup)
     session.first_msg_id_a = m_a.message_id
     session.first_msg_id_b = m_b.message_id
     await repo.save(session)
     log.info("session_started", session_id=session.session_id, user_a_id=session.user_a_id, user_b_id=session.user_b_id)
-
-    await callback.answer()
 
 
 @router.callback_query(F.data.in_({"session:resume_continue", "session:resume_new_topic", "session:resume_not_accurate"}))
@@ -627,7 +884,7 @@ async def cmd_end_session(
         await message.answer("Активной сессии нет.")
         return
 
-    await _request_end_session_confirmation(session=session, repo=repo, bot=bot)
+    await _present_end_session_choice(session=session, repo=repo, bot=bot)
 
 
 @router.callback_query(F.data == "session:end")
@@ -649,18 +906,40 @@ async def cb_end_session(
             await event.answer()
         return
 
+    await _clear_end_session_choice_buttons(session, bot)
+    session.close_choice_active = False
+    session.close_confirmation_pending = False
+    session.close_continue_votes = ""
+    session.close_choice_msg_id_a = 0
+    session.close_choice_msg_id_b = 0
     elapsed = session.elapsed_minutes()
     await svc.end_session(session)
     await state.clear()
 
     repo = SessionRepository(redis, session_factory)
 
-    # Генерируем резюме ДО очистки истории — сохраняем в Redis на 24ч
+    insight_summary_text = ""
+    # Генерируем итог ДО очистки истории — сохраняем в БД и мету на 24ч для post-session удаления
     try:
-        summary_text = await _claude.generate_summary(session, repo)
+        insight = await _claude.generate_session_insight(session, repo)
+        insight_summary_text = insight["summary_text"]
+        await repo.save_session_insight(
+            session_id=session.session_id,
+            user_a_id=session.user_a_id,
+            user_b_id=session.user_b_id,
+            topic=insight["topic"],
+            clarified_text=insight["clarified_text"],
+            agreement_text=insight["agreement_text"],
+            summary_text=insight["summary_text"],
+        )
         summary_ttl = 60 * 60 * 24
-        await redis.set(f"summary:{session.user_a_id}", summary_text, ex=summary_ttl)
-        await redis.set(f"summary:{session.user_b_id}", summary_text, ex=summary_ttl)
+        summary_meta = encode_summary_meta(
+            session_id=session.session_id,
+            user_a_id=session.user_a_id,
+            user_b_id=session.user_b_id,
+        )
+        await redis.set(f"summary_meta:{session.user_a_id}", summary_meta, ex=summary_ttl)
+        await redis.set(f"summary_meta:{session.user_b_id}", summary_meta, ex=summary_ttl)
     except Exception:
         log.warning("session_summary_save_failed", session_id=session.session_id)
 
@@ -694,18 +973,69 @@ async def cb_end_session(
             pass
         await event.answer()
 
-    await svc.notify_both(
-        session,
-        f"Сессия завершена. Длительность: {elapsed} мин.\n\n"
-        f"Что хотите сделать с доступными данными этой сессии — сохранить краткое резюме или удалить их сейчас?",
-        reply_markup=post_session_keyboard(),
-    )
-    await svc.notify_both(
-        session,
-        "Готовы к новому разговору?",
-        reply_markup=main_menu_keyboard(),
-    )
+    survey_base_url = settings.post_session_survey_url.strip()
+    for user_id, role in ((session.user_a_id, "A"), (session.user_b_id, "B")):
+        if not user_id:
+            continue
+        survey_url = _build_post_session_survey_url(
+            survey_base_url,
+            session_id=session.session_id,
+            role=role,
+        )
+        await bot.send_message(
+            user_id,
+            format_bot_dialog_message(
+                _post_session_summary_text(
+                    insight_summary_text or "Итог разговора сохранён.",
+                    has_survey=bool(survey_url),
+                )
+            ),
+            reply_markup=post_session_keyboard(bool(survey_url)),
+        )
     log.info("session_ended", session_id=session.session_id, user_id=user_id, elapsed_minutes=elapsed)
+
+
+@router.callback_query(F.data == "session:survey")
+async def cb_post_session_survey(
+    callback: CallbackQuery,
+    redis: Redis,
+) -> None:
+    await _safe_answer_callback(callback)
+
+    if callback.message is not None:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            log.warning(
+                "post_session_survey_markup_cleanup_failed",
+                user_id=callback.from_user.id,
+                message_id=getattr(callback.message, "message_id", 0),
+            )
+
+    survey_base_url = settings.post_session_survey_url.strip()
+    summary_meta = decode_summary_meta(await redis.get(f"summary_meta:{callback.from_user.id}"))
+    if not survey_base_url or summary_meta is None:
+        await callback.answer("Ссылка на опрос недоступна.", show_alert=True)
+        return
+
+    role = "A" if int(summary_meta.get("user_a_id", 0)) == callback.from_user.id else "B"
+    survey_url = _build_post_session_survey_url(
+        survey_base_url,
+        session_id=str(summary_meta.get("session_id", "")),
+        role=role,
+    )
+    if not survey_url:
+        await callback.answer("Ссылка на опрос недоступна.", show_alert=True)
+        return
+
+    try:
+        await callback.answer(url=survey_url)
+    except Exception:
+        await callback.answer("Опрос готов. Открой его по ссылке, которую я сейчас отправлю.")
+        if callback.message is not None:
+            await callback.message.answer(
+                f'Опрос готов: <a href="{html.escape(survey_url, quote=True)}">открыть анкету</a>'
+            )
 
 
 # ─── /status ─────────────────────────────────────────────────────────────────
@@ -747,10 +1077,15 @@ async def cb_delete_data(
     session = await repo.get_by_user(user_id)
 
     first_msg_id = 0
+    summary_meta = decode_summary_meta(await redis.get(f"summary_meta:{user_id}"))
+    session_id_for_cleanup = None
     if session:
         first_msg_id = session.first_msg_id_a if user_id == session.user_a_id else session.first_msg_id_b
+        session_id_for_cleanup = session.session_id
         await repo.delete(session)
         _release_lock(session.session_id)
+    elif summary_meta is not None:
+        session_id_for_cleanup = str(summary_meta.get("session_id", "")) or None
 
     # Если сессия уже удалена (ephemeral) — берём first_msg_id из отдельного ключа
     if not first_msg_id:
@@ -762,8 +1097,10 @@ async def cb_delete_data(
                 first_msg_id = 0
 
     # Убираем служебные ключи
+    if session_id_for_cleanup:
+        await repo.delete_session_insight(session_id_for_cleanup)
     await redis.delete(f"first_msg:{user_id}")
-    await redis.delete(f"summary:{user_id}")
+    await redis.delete(f"summary_meta:{user_id}")
 
     await state.clear()
     await callback.answer()
@@ -800,44 +1137,73 @@ async def cb_delete_data(
 async def cb_continue_session(callback: CallbackQuery, bot: Bot, redis: Redis, session_factory: async_sessionmaker) -> None:
     repo = SessionRepository(redis, session_factory)
     session = await repo.get_by_user(callback.from_user.id)
-    if session is not None and session.close_confirmation_pending:
+    if session is None:
+        await callback.answer("Активной сессии нет.", show_alert=True)
+        return
+
+    if not session.close_choice_active:
+        if session.close_confirmation_pending:
+            session.close_confirmation_pending = False
+            await repo.save(session)
+            await SessionService(repo, bot).notify_both(
+                session,
+                "Понял. Сессию не завершаю, продолжаем разговор.",
+            )
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.answer()
+        return
+
+    side = session.partner_name(callback.from_user.id)
+    if side is None:
+        await callback.answer("Эта кнопка недоступна.", show_alert=True)
+        return
+
+    votes = set(session.close_continue_votes)
+    if side in votes:
+        await callback.answer("Ваш выбор уже учтён.")
+        return
+
+    votes.add(side)
+    session.close_continue_votes = "".join(sorted(votes))
+    await repo.save(session)
+
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    if votes == {"A", "B"}:
+        await _clear_end_session_choice_buttons(session, bot)
+        session.close_choice_active = False
         session.close_confirmation_pending = False
+        session.close_continue_votes = ""
+        session.close_choice_msg_id_a = 0
+        session.close_choice_msg_id_b = 0
         await repo.save(session)
         await SessionService(repo, bot).notify_both(
             session,
-            "Понял. Сессию не завершаю, продолжаем разговор.",
-        )
-    await callback.message.delete()
-    await callback.answer()
-
-
-@router.callback_query(F.data == "settings")
-async def cb_settings(callback: CallbackQuery) -> None:
-    await callback.message.answer(
-        "⚙️ <b>Настройки</b>\n\n"
-        "Управление данными:\n"
-        "/my_data — посмотреть данные\n"
-        "/delete_data — удалить все данные\n"
-        "/export_data — экспортировать данные\n"
-        "/privacy — политика приватности"
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "session:save_summary")
-async def cb_save_summary(callback: CallbackQuery, redis: Redis, session_factory: async_sessionmaker) -> None:
-    user_id = callback.from_user.id
-    raw = await redis.get(f"summary:{user_id}")
-
-    if not raw:
-        await callback.message.answer(
-            "Резюме недоступно — возможно, сессия была слишком короткой или данные уже удалены."
+            "Понял. Оба выбрали продолжить разговор, сессию не завершаю.",
         )
         await callback.answer()
         return
 
-    summary = raw.decode() if isinstance(raw, bytes) else raw
-    await callback.message.answer(f"📋 <b>Резюме сессии</b>\n\n{html.escape(summary)}")
-    # Удаляем после отправки — данные одноразовые
-    await redis.delete(f"summary:{user_id}")
+    await callback.message.answer(
+        "Принял. Если второй партнёр тоже выберет <b>«Продолжить разговор»</b>, сессия продолжится.\n"
+        "Если второй выберет <b>«Завершить сессию»</b>, разговор завершится."
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "settings")
+async def cb_settings(callback: CallbackQuery, redis: Redis, session_factory: async_sessionmaker) -> None:
+    await send_data_dashboard(
+        callback.message,
+        user_id=callback.from_user.id,
+        redis=redis,
+        session_factory=session_factory,
+        reply_markup=data_actions_keyboard(),
+    )
     await callback.answer()

@@ -226,7 +226,7 @@ def test_process_turn_uses_service_handoff_as_pass_through(monkeypatch) -> None:
     assert repo.events[-1]["next_speaker"] == "B"
 
 
-def test_process_turn_aligns_question_to_a_with_next_speaker_a(monkeypatch) -> None:
+def test_process_turn_keeps_service_handoff_when_reply_addresses_a(monkeypatch) -> None:
     class _ClaudeStub:
         async def get_facilitator_response(self, session, user_message, sender_label, repo, **kwargs):
             return (
@@ -263,12 +263,12 @@ def test_process_turn_aligns_question_to_a_with_next_speaker_a(monkeypatch) -> N
         )
     )
 
-    assert session.waiting_for == "A"
-    assert repo.events[-1]["next_speaker"] == "A"
-    assert repo.events[-1]["addressed_to"] == "A"
+    assert session.waiting_for == "B"
+    assert repo.events[-1]["next_speaker"] == "B"
+    assert repo.events[-1]["addressed_to"] == "B"
 
 
-def test_process_turn_aligns_question_to_b_with_next_speaker_b(monkeypatch) -> None:
+def test_process_turn_keeps_service_handoff_when_reply_addresses_b(monkeypatch) -> None:
     class _ClaudeStub:
         async def get_facilitator_response(self, session, user_message, sender_label, repo, **kwargs):
             return (
@@ -305,12 +305,185 @@ def test_process_turn_aligns_question_to_b_with_next_speaker_b(monkeypatch) -> N
         )
     )
 
+    assert session.waiting_for == "A"
+    assert repo.events[-1]["next_speaker"] == "A"
+    assert repo.events[-1]["addressed_to"] == "A"
+
+
+def test_detect_explicit_reply_addressee_handles_sentence_level_handoff() -> None:
+    session = _session()
+
+    addressee = facilitator._detect_explicit_reply_addressee(
+        session,
+        "Кажется, это про опору в ваших отношениях. Pasha, как ты это слышишь?",
+    )
+
+    assert addressee == "A"
+
+
+def test_detect_explicit_reply_addressee_ignores_mid_sentence_name_mentions() -> None:
+    session = _session()
+
+    addressee = facilitator._detect_explicit_reply_addressee(
+        session,
+        "Когда Pasha, наконец, открывается, напряжение между вами становится ниже.",
+    )
+
+    assert addressee is None
+
+
+def test_detect_explicit_reply_addressee_handles_suffix_vocative_handoff() -> None:
+    session = _session()
+
+    addressee = facilitator._detect_explicit_reply_addressee(
+        session,
+        "Мне интересно, как это звучит для тебя, Pasha? Есть ли чувство, что это что-то меняет?",
+    )
+
+    assert addressee == "A"
+
+
+def test_detect_explicit_reply_addressee_handles_cyrillic_variant_of_latin_name() -> None:
+    session = _session()
+
+    addressee = facilitator._detect_explicit_reply_addressee(
+        session,
+        "Звучит так, что тебе важно чувствовать отклик. Люда, как это для тебя?",
+    )
+
+    assert addressee == "B"
+
+
+def test_process_turn_keeps_service_handoff_on_sentence_level_addressee_signal(monkeypatch) -> None:
+    class _ClaudeStub:
+        async def get_facilitator_response(self, session, user_message, sender_label, repo, **kwargs):
+            return (
+                "Кажется, ты хочешь чувствовать в паре больше опоры. "
+                "Pasha, как ты воспринимаешь эти слова?",
+                False,
+                "BOTH",
+                {
+                    "dialogue_state_before": session.dialogue_state,
+                    "waiting_for_before": session.waiting_for,
+                    "addressed_to": "BOTH",
+                    "next_speaker": "BOTH",
+                    "risk_flag": False,
+                },
+            )
+
+    monkeypatch.setattr(facilitator, "_claude", _ClaudeStub())
+    monkeypatch.setattr(facilitator, "_reply_extras", lambda session: ("", None))
+
+    session = _session(waiting_for="A")
+    repo = _RepoStub()
+    bot = _BotStub()
+    message = _MessageStub(user_id=1)
+
+    asyncio.run(
+        facilitator._process_turn(
+            text="обычный ответ",
+            relay_text="обычный ответ",
+            message=message,
+            session=session,
+            sender_label="A",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+
+    assert session.waiting_for == "BOTH"
+    assert repo.events[-1]["next_speaker"] == "BOTH"
+    assert repo.events[-1]["addressed_to"] == "BOTH"
+
+
+def test_process_turn_keeps_service_handoff_on_suffix_vocative_signal(monkeypatch) -> None:
+    class _ClaudeStub:
+        async def get_facilitator_response(self, session, user_message, sender_label, repo, **kwargs):
+            return (
+                "Спасибо, что поделилась. Мне интересно, как это звучит для тебя, Pasha? "
+                "Есть ли чувство, что это что-то меняет?",
+                False,
+                "B",
+                {
+                    "dialogue_state_before": session.dialogue_state,
+                    "waiting_for_before": session.waiting_for,
+                    "addressed_to": "B",
+                    "next_speaker": "B",
+                    "risk_flag": False,
+                },
+            )
+
+    monkeypatch.setattr(facilitator, "_claude", _ClaudeStub())
+    monkeypatch.setattr(facilitator, "_reply_extras", lambda session: ("", None))
+
+    session = _session(waiting_for="B")
+    repo = _RepoStub()
+    bot = _BotStub()
+    message = _MessageStub(user_id=2)
+
+    asyncio.run(
+        facilitator._process_turn(
+            text="обычный ответ",
+            relay_text="обычный ответ",
+            message=message,
+            session=session,
+            sender_label="B",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+
     assert session.waiting_for == "B"
     assert repo.events[-1]["next_speaker"] == "B"
     assert repo.events[-1]["addressed_to"] == "B"
 
 
-def test_process_turn_keeps_both_only_for_joint_reply(monkeypatch) -> None:
+def test_process_turn_keeps_service_handoff_on_cyrillic_name_signal(monkeypatch) -> None:
+    class _ClaudeStub:
+        async def get_facilitator_response(self, session, user_message, sender_label, repo, **kwargs):
+            return (
+                "Звучит так, что тебе важно чувствовать отклик. Люда, как это для тебя? "
+                "Есть ли что-то, что ты могла бы предложить?",
+                False,
+                "BOTH",
+                {
+                    "dialogue_state_before": session.dialogue_state,
+                    "waiting_for_before": session.waiting_for,
+                    "addressed_to": "BOTH",
+                    "next_speaker": "BOTH",
+                    "risk_flag": False,
+                },
+            )
+
+    monkeypatch.setattr(facilitator, "_claude", _ClaudeStub())
+    monkeypatch.setattr(facilitator, "_reply_extras", lambda session: ("", None))
+
+    session = _session(waiting_for="A")
+    repo = _RepoStub()
+    bot = _BotStub()
+    message = _MessageStub(user_id=1)
+
+    asyncio.run(
+        facilitator._process_turn(
+            text="обычный ответ",
+            relay_text="обычный ответ",
+            message=message,
+            session=session,
+            sender_label="A",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+
+    assert session.waiting_for == "BOTH"
+    assert repo.events[-1]["next_speaker"] == "BOTH"
+    assert repo.events[-1]["addressed_to"] == "BOTH"
+
+
+def test_process_turn_keeps_service_handoff_on_joint_reply_signal(monkeypatch) -> None:
     class _ClaudeStub:
         async def get_facilitator_response(self, session, user_message, sender_label, repo, **kwargs):
             return (
@@ -347,9 +520,9 @@ def test_process_turn_keeps_both_only_for_joint_reply(monkeypatch) -> None:
         )
     )
 
-    assert session.waiting_for == "BOTH"
-    assert repo.events[-1]["next_speaker"] == "BOTH"
-    assert repo.events[-1]["addressed_to"] == "BOTH"
+    assert session.waiting_for == "A"
+    assert repo.events[-1]["next_speaker"] == "A"
+    assert repo.events[-1]["addressed_to"] == "A"
 
 
 def test_add_message_truncates_history_content_to_max_length() -> None:
@@ -390,6 +563,13 @@ def test_setup_topic_split_ignores_same_topic_with_overlap() -> None:
     assert facilitator._looks_like_setup_topic_split(
         "Хочу обсудить тему детей.",
         "Для меня тема детей сейчас самая важная.",
+    ) is False
+
+
+def test_setup_topic_split_ignores_topic_and_meta_participation() -> None:
+    assert facilitator._looks_like_setup_topic_split(
+        "Хочу обсудить вопрос нашего сексуального взаимодействия.",
+        "Я просто готова участвовать в сессии.",
     ) is False
 
 
@@ -437,3 +617,111 @@ def test_collect_for_both_triggers_setup_topic_split_guard(monkeypatch) -> None:
     assert session.last_turn_summary == facilitator.SETUP_TOPIC_SPLIT_SUMMARY
     assert repo.events[-1]["next_speaker"] == "BOTH"
     assert repo.events[-1]["addressed_to"] == "BOTH"
+
+
+def test_collect_for_both_prompts_seed_topic_when_other_partner_is_neutral(monkeypatch) -> None:
+    class _ClaudeStub:
+        async def get_facilitator_response(self, *args, **kwargs):
+            raise AssertionError("Claude should not be called when setup topic seed prompt triggers")
+
+    monkeypatch.setattr(facilitator, "_claude", _ClaudeStub())
+
+    session = _session(waiting_for="BOTH", state="SETUP")
+    repo = _RepoStub()
+    bot = _BotStub()
+    first_message = _MessageStub(user_id=1)
+    second_message = _MessageStub(user_id=2)
+
+    asyncio.run(
+        facilitator._collect_for_both(
+            text="Хочу обсудить вопрос нашего сексуального взаимодействия.",
+            relay_text="Хочу обсудить вопрос нашего сексуального взаимодействия.",
+            message=first_message,
+            session=session,
+            sender_label="A",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+    asyncio.run(
+        facilitator._collect_for_both(
+            text="Я просто готова участвовать в сессии.",
+            relay_text="Я просто готова участвовать в сессии.",
+            message=second_message,
+            session=session,
+            sender_label="B",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+
+    assert first_message.answers == ["Принято. Жду ответа от второго партнёра."]
+    assert any("тему на старт сейчас предлагает Pasha" in text for _, text in bot.sent_messages)
+    assert any("Если вам ок начать с этой темы" in text for _, text in bot.sent_messages)
+    assert session.waiting_for == "BOTH"
+    assert session.last_turn_summary.startswith(facilitator.SETUP_TOPIC_SEED_SUMMARY_PREFIX)
+    assert repo.events[-1]["next_speaker"] == "BOTH"
+    assert repo.events[-1]["addressed_to"] == "BOTH"
+
+
+def test_collect_for_both_passes_canonical_both_turn_to_service(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    class _ClaudeStub:
+        async def get_facilitator_response(self, session, user_message, sender_label, repo, **kwargs):
+            captured["user_message"] = user_message
+            captured["sender_label"] = sender_label
+            return (
+                "Pasha, давай остановимся на твоей стороне.",
+                False,
+                "A",
+                {
+                    "dialogue_state_before": session.dialogue_state,
+                    "waiting_for_before": session.waiting_for,
+                    "addressed_to": "A",
+                    "next_speaker": "A",
+                    "risk_flag": False,
+                },
+            )
+
+    monkeypatch.setattr(facilitator, "_claude", _ClaudeStub())
+    monkeypatch.setattr(facilitator, "_reply_extras", lambda session: ("", None))
+
+    session = _session(waiting_for="BOTH", state="SETUP")
+    repo = _RepoStub()
+    bot = _BotStub()
+    first_message = _MessageStub(user_id=1)
+    second_message = _MessageStub(user_id=2)
+
+    asyncio.run(
+        facilitator._collect_for_both(
+            text="Хочу обсудить переезд в Испанию.",
+            relay_text="Хочу обсудить переезд в Испанию.",
+            message=first_message,
+            session=session,
+            sender_label="A",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+    asyncio.run(
+        facilitator._collect_for_both(
+            text="Хочу понять наши планы по переезду в Испанию.",
+            relay_text="Хочу понять наши планы по переезду в Испанию.",
+            message=second_message,
+            session=session,
+            sender_label="B",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+
+    assert captured["sender_label"] == "BOTH"
+    assert captured["user_message"] == (
+        "[A]: Хочу обсудить переезд в Испанию.\n"
+        "[B]: Хочу понять наши планы по переезду в Испанию."
+    )

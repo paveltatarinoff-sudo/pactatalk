@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 import json
 from dataclasses import asdict
@@ -10,9 +12,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 import structlog
 
 from bot.models.session_event import SessionEvent
+from bot.models.session_insight import SessionInsight
 from bot.models.session import SessionState
 from bot.models.session_record import SessionSnapshot
 from bot.models.pair_resume import PairResume, make_pair_key
+from bot.models.user_request import UserRequest
 
 SESSION_TTL = 60 * 60 * 24 * 7  # 7 дней
 INVITE_TTL = 60 * 60 * 24       # 24 часа (инвайт-коды — короткоживущие)
@@ -248,6 +252,7 @@ class SessionRepository:
     async def delete_user_redis_aux(self, user_id: int) -> None:
         await self._redis.delete(
             f"summary:{user_id}",
+            f"summary_meta:{user_id}",
             f"first_msg:{user_id}",
             self._user_key(user_id),
         )
@@ -260,6 +265,8 @@ class SessionRepository:
             await self.delete_session_artifacts(session_id)
 
         deleted_pair_resumes = await self.delete_pair_resumes_for_user(user_id)
+        deleted_insights = await self.delete_session_insights_for_user(user_id)
+        deleted_requests = await self.delete_user_requests_for_user(user_id)
         await self.delete_user_redis_aux(user_id)
 
         return {
@@ -267,6 +274,8 @@ class SessionRepository:
             "session_artifacts_deleted": len(session_ids),
             "pair_keys_found": len(pair_keys),
             "pair_resumes_deleted": deleted_pair_resumes,
+            "session_insights_deleted": deleted_insights,
+            "user_requests_deleted": deleted_requests,
         }
 
     async def list_active_sessions(self) -> list[SessionState]:
@@ -387,4 +396,188 @@ class SessionRepository:
         pair_key = make_pair_key(user_a_id, user_b_id)
         async with self._session_factory() as db:
             await db.execute(delete(PairResume).where(PairResume.pair_key == pair_key))
+            await db.commit()
+
+    async def save_session_insight(
+        self,
+        session_id: str,
+        user_a_id: int,
+        user_b_id: int,
+        topic: str,
+        clarified_text: str,
+        agreement_text: str,
+        summary_text: str,
+    ) -> None:
+        if self._session_factory is None:
+            return
+
+        async with self._session_factory() as db:
+            existing = await db.get(SessionInsight, session_id)
+            if existing is None:
+                db.add(
+                    SessionInsight(
+                        session_id=session_id,
+                        user_a_id=user_a_id,
+                        user_b_id=user_b_id,
+                        topic=topic,
+                        clarified_text=clarified_text,
+                        agreement_text=agreement_text,
+                        summary_text=summary_text,
+                    )
+                )
+            else:
+                existing.user_a_id = user_a_id
+                existing.user_b_id = user_b_id
+                existing.topic = topic
+                existing.clarified_text = clarified_text
+                existing.agreement_text = agreement_text
+                existing.summary_text = summary_text
+                existing.updated_at = datetime.utcnow()
+            await db.commit()
+
+    async def list_session_insights_for_user(self, user_id: int, limit: int | None = 5) -> list[SessionInsight]:
+        if self._session_factory is None:
+            return []
+
+        async with self._session_factory() as db:
+            stmt = (
+                select(SessionInsight)
+                .where(
+                    or_(
+                        SessionInsight.user_a_id == user_id,
+                        SessionInsight.user_b_id == user_id,
+                    )
+                )
+                .order_by(SessionInsight.created_at.desc())
+            )
+            if limit is not None:
+                stmt = stmt.limit(limit)
+            result = await db.execute(stmt)
+            return list(result.scalars().all())
+
+    async def list_pair_resumes_for_user(self, user_id: int, limit: int | None = None) -> list[PairResume]:
+        if self._session_factory is None:
+            return []
+
+        lo_pattern = f"{user_id}:%"
+        hi_pattern = f"%:{user_id}"
+
+        async with self._session_factory() as db:
+            stmt = (
+                select(PairResume)
+                .where(
+                    or_(
+                        PairResume.pair_key.like(lo_pattern),
+                        PairResume.pair_key.like(hi_pattern),
+                    )
+                )
+                .order_by(PairResume.updated_at.desc())
+            )
+            if limit is not None:
+                stmt = stmt.limit(limit)
+            result = await db.execute(stmt)
+            return list(result.scalars().all())
+
+    async def delete_session_insight(self, session_id: str) -> int:
+        if self._session_factory is None:
+            return 0
+
+        async with self._session_factory() as db:
+            result = await db.execute(delete(SessionInsight).where(SessionInsight.session_id == session_id))
+            await db.commit()
+            return int(result.rowcount or 0)
+
+    async def delete_session_insights_for_user(self, user_id: int) -> int:
+        if self._session_factory is None:
+            return 0
+
+        async with self._session_factory() as db:
+            result = await db.execute(
+                delete(SessionInsight).where(
+                    or_(
+                        SessionInsight.user_a_id == user_id,
+                        SessionInsight.user_b_id == user_id,
+                    )
+                )
+            )
+            await db.commit()
+            return int(result.rowcount or 0)
+
+    async def create_user_request(
+        self,
+        *,
+        telegram_id: int,
+        username: str | None,
+        first_name: str,
+        kind: str,
+        category: str,
+        message_text: str,
+        session_id: str | None,
+    ) -> int | None:
+        if self._session_factory is None:
+            return None
+
+        async with self._session_factory() as db:
+            request = UserRequest(
+                telegram_id=telegram_id,
+                username=username,
+                first_name=first_name,
+                kind=kind,
+                category=category,
+                message_text=message_text,
+                session_id=session_id,
+            )
+            db.add(request)
+            await db.commit()
+            await db.refresh(request)
+            return int(request.id)
+
+    async def delete_user_requests_for_user(self, user_id: int) -> int:
+        if self._session_factory is None:
+            return 0
+
+        async with self._session_factory() as db:
+            result = await db.execute(delete(UserRequest).where(UserRequest.telegram_id == user_id))
+            await db.commit()
+            return int(result.rowcount or 0)
+
+    async def list_user_requests_for_user(self, user_id: int, limit: int | None = None) -> list[UserRequest]:
+        if self._session_factory is None:
+            return []
+
+        async with self._session_factory() as db:
+            stmt = (
+                select(UserRequest)
+                .where(UserRequest.telegram_id == user_id)
+                .order_by(UserRequest.created_at.desc())
+            )
+            if limit is not None:
+                stmt = stmt.limit(limit)
+            result = await db.execute(stmt)
+            return list(result.scalars().all())
+
+    async def get_user_request(self, request_id: int) -> UserRequest | None:
+        if self._session_factory is None:
+            return None
+
+        async with self._session_factory() as db:
+            return await db.get(UserRequest, request_id)
+
+    async def update_user_request_status(
+        self,
+        request_id: int,
+        *,
+        status: str,
+        admin_reply_text: str | None = None,
+    ) -> None:
+        if self._session_factory is None:
+            return
+
+        async with self._session_factory() as db:
+            request = await db.get(UserRequest, request_id)
+            if request is None:
+                return
+            request.status = status
+            if admin_reply_text is not None:
+                request.admin_reply_text = admin_reply_text
             await db.commit()

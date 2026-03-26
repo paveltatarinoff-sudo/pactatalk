@@ -6,6 +6,7 @@ from redis.asyncio import Redis
 
 RESUME_CHOICE_CONTINUE = "continue"
 RESUME_CHOICE_NEW_TOPIC = "new_topic"
+RESUME_CHOICE_FLEXIBLE = "flexible"
 RESUME_CHOICE_ALIGNMENT_PENDING = "alignment_pending"
 RESUME_CHOICE_TTL_SECONDS = 60 * 60 * 24
 
@@ -25,6 +26,23 @@ _NEW_TOPIC_MARKERS = (
     "не похоже",
     "не то",
 )
+_FLEXIBLE_MARKERS = (
+    "без разницы",
+    "мне ок любой вариант",
+    "мне ок любой",
+    "мне подойдет любой",
+    "мне подойдет любой",
+    "любой вариант",
+    "как вам удобнее",
+    "как вам лучше",
+    "как хотите",
+    "как скажете",
+    "не важно",
+    "неважно",
+    "можно и так и так",
+    "можно как угодно",
+    "могу и так и так",
+)
 
 
 def normalize_resume_choice(raw_choice: str | None) -> str | None:
@@ -43,6 +61,8 @@ def classify_resume_resolution_text(text: str) -> str | None:
     normalized = " ".join((text or "").strip().lower().replace("ё", "е").split())
     if not normalized:
         return None
+    if any(marker in normalized for marker in _FLEXIBLE_MARKERS):
+        return RESUME_CHOICE_FLEXIBLE
     has_continue = any(marker in normalized for marker in _CONTINUE_MARKERS)
     has_new_topic = any(marker in normalized for marker in _NEW_TOPIC_MARKERS)
     if has_continue and not has_new_topic:
@@ -52,14 +72,25 @@ def classify_resume_resolution_text(text: str) -> str | None:
     return None
 
 
-def decide_resume_resolution(text_a: str, text_b: str) -> str | None:
+def decide_resume_resolution(
+    text_a: str,
+    text_b: str,
+    *,
+    default_resolution: str | None = None,
+) -> str | None:
     choice_a = classify_resume_resolution_text(text_a)
     choice_b = classify_resume_resolution_text(text_b)
-    if choice_a is None or choice_b is None:
-        return None
-    if choice_a != choice_b:
-        return None
-    return choice_a
+    concrete_choices = {RESUME_CHOICE_CONTINUE, RESUME_CHOICE_NEW_TOPIC}
+
+    if choice_a in concrete_choices and choice_a == choice_b:
+        return choice_a
+    if choice_a == RESUME_CHOICE_FLEXIBLE and choice_b in concrete_choices:
+        return choice_b
+    if choice_b == RESUME_CHOICE_FLEXIBLE and choice_a in concrete_choices:
+        return choice_a
+    if choice_a == RESUME_CHOICE_FLEXIBLE and choice_b == RESUME_CHOICE_FLEXIBLE:
+        return default_resolution
+    return None
 
 
 def _vote_key(session_id: str, user_id: int) -> str:
@@ -142,6 +173,22 @@ async def save_alignment_reply(redis: Redis, session_id: str, user_id: int, text
     await redis.set(_reply_key(session_id, user_id), text, ex=RESUME_CHOICE_TTL_SECONDS)
 
 
+async def get_alignment_replies(
+    redis: Redis,
+    *,
+    session_id: str,
+    user_a_id: int,
+    user_b_id: int,
+) -> tuple[str | None, str | None]:
+    reply_a = await redis.get(_reply_key(session_id, user_a_id))
+    reply_b = await redis.get(_reply_key(session_id, user_b_id))
+    if isinstance(reply_a, bytes):
+        reply_a = reply_a.decode("utf-8")
+    if isinstance(reply_b, bytes):
+        reply_b = reply_b.decode("utf-8")
+    return reply_a, reply_b
+
+
 async def process_alignment_reply(
     redis: Redis,
     *,
@@ -150,26 +197,33 @@ async def process_alignment_reply(
     user_a_id: int,
     user_b_id: int,
     text: str,
-) -> tuple[str, str | None]:
+    default_resolution: str | None = None,
+) -> tuple[str, str | None, str | None, str | None]:
     await save_alignment_reply(redis, session_id, user_id, text)
-    reply_a = await redis.get(_reply_key(session_id, user_a_id))
-    reply_b = await redis.get(_reply_key(session_id, user_b_id))
-    if isinstance(reply_a, bytes):
-        reply_a = reply_a.decode("utf-8")
-    if isinstance(reply_b, bytes):
-        reply_b = reply_b.decode("utf-8")
+    reply_a, reply_b = await get_alignment_replies(
+        redis,
+        session_id=session_id,
+        user_a_id=user_a_id,
+        user_b_id=user_b_id,
+    )
 
     if not reply_a or not reply_b:
-        return "waiting", None
+        return "waiting", None, None, None
 
-    resolution = decide_resume_resolution(str(reply_a), str(reply_b))
-    await redis.delete(_reply_key(session_id, user_a_id), _reply_key(session_id, user_b_id))
+    choice_a = classify_resume_resolution_text(str(reply_a))
+    choice_b = classify_resume_resolution_text(str(reply_b))
+    resolution = decide_resume_resolution(
+        str(reply_a),
+        str(reply_b),
+        default_resolution=default_resolution,
+    )
 
     if resolution is None:
-        return "retry", None
+        return "retry", None, choice_a, choice_b
 
+    await redis.delete(_reply_key(session_id, user_a_id), _reply_key(session_id, user_b_id))
     await _set_resume_resolution(redis, session_id, resolution)
-    return "resolved", resolution
+    return "resolved", resolution, choice_a, choice_b
 
 
 async def clear_alignment_replies(redis: Redis, session_id: str, user_ids: Iterable[int]) -> None:

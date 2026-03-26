@@ -6,18 +6,21 @@ import structlog
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand, MenuButtonCommands
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, async_sessionmaker
 
 from bot.config import settings
-from bot.handlers import start, session, facilitator, privacy, admin
+from bot.handlers import start, session, facilitator, privacy, admin, menu
 from bot.models.user import Base
 from bot.repositories.session_repo import SessionRepository
 from bot.services.session_service import SessionService
 from bot.models.session_record import SessionSnapshot  # noqa: F401
 from bot.models.session_event import SessionEvent  # noqa: F401
 from bot.models.pair_resume import PairResume  # noqa: F401
+from bot.models.session_insight import SessionInsight  # noqa: F401
+from bot.models.user_request import UserRequest  # noqa: F401
 
 logger = structlog.get_logger()
 MAX_TIMEOUT_REMINDERS = 3
@@ -75,6 +78,23 @@ async def health_check(redis: Redis, engine: AsyncEngine) -> tuple[bool, dict[st
 
     healthy = all(status == "ok" for status in checks.values())
     return healthy, checks
+
+
+async def configure_telegram_ui(bot: Bot) -> None:
+    await bot.set_my_commands(
+        [
+            BotCommand(command="end_session", description="Закончить разговор"),
+            BotCommand(command="progress", description="Мои итоги"),
+            BotCommand(command="help", description="Как это работает"),
+            BotCommand(command="feedback", description="Поделиться впечатлением"),
+            BotCommand(command="support", description="Нужна помощь"),
+            BotCommand(command="data", description="Мои данные"),
+            BotCommand(command="new_session", description="Создать новую сессию"),
+            BotCommand(command="join", description="Присоединиться по коду"),
+            BotCommand(command="status", description="Статус текущей сессии"),
+        ]
+    )
+    await bot.set_chat_menu_button(menu_button=MenuButtonCommands(type="commands"))
 
 
 async def timeout_watcher(bot: Bot, redis: Redis, session_factory: async_sessionmaker) -> None:
@@ -141,6 +161,7 @@ async def main() -> None:
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+    await configure_telegram_ui(bot)
     dp = Dispatcher()
 
     # Передаём зависимости через workflow_data
@@ -152,12 +173,16 @@ async def main() -> None:
     # Порядок важен: команды и кнопки — первыми, фасилитатор — последним
     dp.include_router(admin.router)
     dp.include_router(start.router)
+    dp.include_router(menu.router)
     dp.include_router(session.router)
     dp.include_router(privacy.router)
     dp.include_router(facilitator.router)  # перехватывает всё остальное
 
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY не задан в .env — бот не может запуститься без ключа.")
+
+    if not (settings.support_inbox_ids or settings.admin_ids):
+        log.warning("support_inbox_not_configured_feedback_and_support_will_not_be_forwarded")
 
     log.info("Starting PactaTalk Bot", env=settings.env)
     timeout_task = asyncio.create_task(timeout_watcher(bot, redis, session_factory))

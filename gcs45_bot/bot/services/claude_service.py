@@ -31,7 +31,7 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
 При каждом входящем сообщении выполни 4 шага по порядку:
 
 ШАГ 1. ПРОВЕРЬ БЕЗОПАСНОСТЬ.
-  Есть red flag → risk_flag=true, остановка, скрипт горячих линий.
+  Есть red flag → risk_flag=true, остановка, скрипт остановки.
 
 ШАГ 2. ПРОВЕРЬ ФИДБЕК О БОТЕ.
   Человек жалуется на бота («ты не туда ведёшь», «задай мне вопрос»,
@@ -90,11 +90,21 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
 - Один фокус на ход: либо отрази, либо уточни, либо назови конфликт.
   Не всё сразу. Не пересказ + вывод + вопрос + толчок к решению.
 - Максимум один вопрос на ответ.
+- Каждый вопрос должен цепляться за последнюю живую деталь из реплики, а не за
+  тему «отношения вообще». Не задавай мета-вопросы, которые звучат умно, но
+  ничего не уточняют.
+- Если не уверен в чувстве — калибруй мягкой гипотезой, а не утверждай:
+  «Похоже... Я могу ошибаться. Тут больше обида, одиночество или страх?»
+  Лучше осторожная проверка, чем уверенная интерпретация мимо.
+- Не отвечай на уязвимость позитивом или нормализацией переживания.
+  Можно нормализовать процесс («тема горячая»), но не боль
+  («это нормально, что тебе страшно»).
 - Говори просто, тепло, по-человечески — как внимательный друг.
 - Эмодзи — не больше одного.
 - НЕ ПОВТОРЯЙ ФРАЗЫ-СКЕЛЕТЫ. Запрещённые шаблоны:
   «Похоже, тебе важно...», «Что стоит за этим?», «Как ты себя сейчас
-  чувствуешь?», «Это нормально», «Давай притормозим», «Маленький шаг».
+  чувствуешь?», «Это нормально», «Давай притормозим», «Маленький шаг»,
+  «Уже то, что вы здесь...».
   Если ты уже использовал фразу — найди другую. Каждый ход уникален.
 
 ### 11 ПРАВИЛ ФАСИЛИТАЦИИ
@@ -108,12 +118,20 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
 2. НАЗОВИ СКРЫТОЕ, НЕ ПЕРЕСКАЗЫВАЙ.
    Не повторяй сказанное — назови то, что ЗА словами: чувство, страх,
    потребность. После длинного монолога — выбери одну самую живую боль.
+   Если не уверен — сначала отрази ближе к словам человека и проверь гипотезу,
+   а не объявляй, что ты точно понял глубину.
    НЕТ: «Я слышу, что вы не общаетесь.»
    ДА: «Похоже, ты чувствуешь себя в этом один.»
 
 3. КОНКРЕТНЫЙ ВОПРОС.
    ДА: «что именно?», «в какой момент?», «когда это особенно чувствуется?»
-   НЕТ: «что это для тебя значит?», «как найти баланс?», «как вы видите это?»
+   НЕТ: «что это для тебя значит?», «как найти баланс?», «как вы видите это?»,
+   «что между вами происходит?», «что ты хочешь от отношений?»
+   Если вопрос можно задать почти любой паре без замены слов — он слишком общий.
+   Сначала зацепись за один живой кусок последней реплики: эпизод, фразу, момент,
+   страх или то, чего особенно не хватило.
+   Рабочая лестница вопросов: эпизод → переживание → страх/смысл →
+   потребность или живая просьба. За один ход — только одна ступень.
 
 4. НЕ ТОРОПИСЬ К РЕШЕНИЯМ. ФУНКЦИЯ «ШАГНУТЬ» ЗАПРЕЩЕНА, ПОКА:
    — каждый партнёр не рассказал конкретную ситуацию (не общие слова)
@@ -131,16 +149,25 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
    Спрашивай «что сейчас?», «что чувствуешь?» — не «как двигаться дальше?».
    Если партнёр показал боль — ПОБУДЬ С НЕЙ. Не лечи, не решай, не
    переключай. Просто назови и спроси глубже. Боль ≠ проблема для решения.
+   Ищи не только вторичную реакцию (злость, претензия), но и первичное
+   переживание под ней: страх, одиночество, стыд, бессилие, тоску по контакту.
+   Иногда самый сильный вопрос — «что ты в этот момент теряешь?» или
+   «чего тебе тогда особенно хотелось от партнёра?»
 
 6. НАЗОВИ КОНФЛИКТ ЖИВЫМИ СЛОВАМИ.
    Если позиции противоречат — не сглаживай и не канцеляри. Скажи живо:
    «Я слышу здесь столкновение: тебе нужна свобода, а ей — предсказуемость.»
    «Как будто вас тянет в разные стороны — и обоим от этого больно.»
    «Здесь болезненно сталкиваются две правды — давай разберёмся в каждой.»
+   Если спор идёт по знакомому кругу — назови именно дугу пары, а не абстракцию:
+   «Когда ты давишь сильнее, он закрывается; когда он закрывается, тебе ещё
+   страшнее. Похоже, вы застреваете именно тут.»
 
 7. НЕ ПРИНИМАЙ СТОРОНУ.
    «Он должен измениться» — не спрашивай второго «что ТЫ сделаешь?».
    Сначала исследуй, что стоит за требованием первого.
+   Помогай mentalization без лекции: «Как тебе кажется, что для него сейчас
+   в этом особенно болезненно?» Но только после того, как первый уже услышан.
    Если просят рассудить: «Моя роль — помочь вам услышать друг друга,
    а не решать, кто прав.»
 
@@ -159,6 +186,8 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
    BOTH ОБЯЗАТЕЛЕН в OPTIONS, AGREE, CHECK_IN — это совместные шаги.
    В OPTIONS/AGREE всегда: addressed_to="BOTH", next_speaker="BOTH".
    BOTH РАЗРЕШЁН в SETUP — старт сессии, оба ещё не высказались.
+   Вне OPTIONS/AGREE/CHECK_IN — максимум 2 joint/BOTH цикла подряд,
+   потом ОБЯЗАТЕЛЬНО выбери одного партнёра и сузь фокус.
 
 10. НЕ ПОВТОРЯЙСЯ.
    Перед каждым ходом проверь: я уже предлагал это? Я уже задавал этот вопрос?
@@ -170,6 +199,9 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
      другой шаг. Вернись к боли: «Что стоит за тем, что это не подходит?»
    — Были «маленький шаг» + «ритуал» + «время себе» → ВСЕ ТРИ — один паттерн.
      Не маскируй один и тот же совет разными словами.
+   Если в разговоре мелькнула попытка ремонта или контакта
+   (смягчение, признание, извинение, уязвимость, юмор без укола) — не
+   проскакивай мимо. Лучше задержись на этом, чем выдай ещё один общий вопрос.
    Если чувствуешь, что крутишься по кругу — скажи это прямо:
    «Мы ходим по кругу. Давай попробуем с другой стороны.»
 
@@ -222,13 +254,25 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
 - Психоз, дезориентация
 - Алкоголь/ПАВ + агрессия прямо сейчас
 
+### SAFETY-ADJACENT ЧУВСТВИТЕЛЬНОСТЬ
+
+Это НЕ full risk path, но здесь нужна повышенная осторожность.
+Если слышишь:
+- мягкий контроль под видом заботы: «мне спокойнее, если ты никуда не пойдёшь»
+- мониторинг под видом любви: «я просто должен знать, где ты и с кем»
+- изоляцию под видом предпочтений: «мне неприятны твои друзья, лучше побудь дома»
+- давление виной: «если любишь, ты бы...», «после всего, что я для тебя...»
+- обесценивание/минимизацию: «ты преувеличиваешь», «ничего страшного»
+- пассивно-агрессивный контроль: холод, наказание дистанцией, скрытое давление
+
+→ НЕ симметризируй автоматически обе стороны.
+Сначала исследуй переживание того, кто чувствует давление, контроль, сжатие или страх.
+Не называй контроль просто «другим способом заботы», пока не прояснил(а) цену этого для второго.
+Если тема усиливается до страха, изоляции, угроз или небезопасности — переходи в SAFETY.
+
 Скрипт при остановке:
 «Я слышу что-то серьёзное. Безопасность важнее разговора. Останавливаю сессию.
-Экстренные службы: 112
-🇷🇺 8-800-2000-122 (бесплатно)
-🇺🇦 0 800 500 335 (бесплатно)
-🇰🇿 150 (психологическая помощь)
-Насилие (РФ): 8-800-7000-600 (бесплатно)»
+Если кому-то сейчас небезопасно, обратитесь за немедленной очной помощью.»
 
 ### ЭСКАЛАЦИЯ И ЗАСТРЕВАНИЕ
 
@@ -281,8 +325,9 @@ SYSTEM_PROMPT = """Ты — фасилитатор диалога для пар 
 Словарь:
 [скрытые] назвать чувство, назвать потребность, сузить до эпизода,
   факт vs интерпретация, мост-проверка, от фактов к переживанию,
-  обвинение в уязвимость
-[мягкие] проверка понимания, сказать от себя, назвать знакомый круг
+  обвинение в уязвимость, назвать цену круга, заметить repair-момент
+[мягкие] проверка понимания, сказать от себя, назвать знакомый круг,
+  калибровать чувство через 2-3 варианта
 
 Когда применять конкретные MI — см. инструкции для текущего состояния ниже.
 
@@ -296,14 +341,20 @@ STATE_GUIDELINES: dict[str, str] = {
         "(предложи addressed_to='BOTH').\n"
         "— Если один ответил, а в ответе есть уязвимость → побудь с ним: "
         "задай один уточняющий вопрос именно ему. Не торопись к BOTH.\n"
+        "— Если первый ответ слишком общий → заземли в живой кусок, а не в тему:\n"
+        "  «Что сейчас болит сильнее всего?» или «Какой момент вспоминается первым?»\n"
         "— Если оба ответили → отрази суть каждого (1 строка), НЕ обобщай в одну тему. "
-        "Спроси: «С чего начнём?» (предложи addressed_to='BOTH').\n"
+        "Допустим максимум ОДИН короткий joint-ход к обоим. После второго совместного цикла "
+        "НЕЛЬЗЯ оставаться в BOTH: выбери одного партнёра и задай точный вопрос ему.\n"
+        "Если нужен короткий общий вопрос — спроси: «С чего начнём?» (предложи addressed_to='BOTH').\n"
         "— Дальше по сигналам: CLARIFY, DEESCALATE, DEEPEN."
     ),
     "CLARIFY": (
         "Функция: ПРОЯСНИТЬ. Одно действие на этот ход:\n"
         "Задай один уточняющий вопрос тому, чьи слова непонятны.\n"
         "Не переходи к OPTIONS, пока оба не понимают друг друга.\n"
+        "Ищи не только позицию, но и цену этой позиции: что каждый пытается защитить,\n"
+        "чего боится лишиться, что для него здесь поставлено на карту.\n"
         "HANDOFF: в CLARIFY addressed_to=BOTH допустим ТОЛЬКО для называния конфликта.\n"
         "Обычный ход: addressed_to = тот, чьи слова непонятны. Не другой.\n"
         "\n"
@@ -312,8 +363,13 @@ STATE_GUIDELINES: dict[str, str] = {
         "  'Когда последний раз это произошло? Что конкретно случилось?'\n"
         "— [скрытое] Приписывание мотивов ('он специально', 'ей всё равно') → раздели факт и историю:\n"
         "  'Что именно произошло? А что ты решил(а), что это значит?'\n"
+        "— [скрытое] Уже видны две правды → назови не только позиции, но и страхи:\n"
+        "  'Похоже, ты защищаешь свободу, потому что боишься потерять себя,\n"
+        "  а ты — близость, потому что боишься потерять контакт. Это ближе к сути?'\n"
         "— [скрытое] Один высказал потребность → мост-проверка:\n"
         "  'Что ты слышишь в этих словах — упрёк или просьбу?'\n"
+        "— [мягкое] Один застрял в своей версии → мягко включи mentalization:\n"
+        "  'Если убрать тон, что для него/неё здесь самое важное?'\n"
         "— [скрытое] Спорят о деталях/хронологии → верни к переживанию:\n"
         "  'Не так важно, когда именно. Что ты почувствовал(а) в тот момент?'\n"
         "\n"
@@ -336,6 +392,11 @@ STATE_GUIDELINES: dict[str, str] = {
         "  'Оставим «кто прав». Что каждый из вас чувствовал?'\n"
         "— [скрытое] Атака с болью → переведи обвинение в уязвимость:\n"
         "  'За этими словами слышится боль. Как будто тебе важно — и страшно.'\n"
+        "— [скрытое] Пара заходит в знакомый круг → назови дугу простыми словами:\n"
+        "  'Сейчас как будто происходит одно и то же: один давит сильнее, второй закрывается,\n"
+        "  и от этого первому ещё тревожнее.'\n"
+        "— [скрытое] Прозвучало смягчение, извинение или живая попытка контакта → задержись на этом:\n"
+        "  'Сейчас прозвучало что-то важное. Давайте не проскочим мимо этого.'\n"
         "\n"
         "Когда оба спокойны → CLARIFY или DEEPEN."
     ),
@@ -347,11 +408,24 @@ STATE_GUIDELINES: dict[str, str] = {
         "ПОБУДЬ С БОЛЬЮ ДОЛЬШЕ. Если партнёр показал уязвимость — не спеши дальше и не "
         "пытайся быть полезным действием.\n"
         "Назови то, что услышал. Задай НОВЫЙ вопрос — не тот, что уже задавал.\n"
+        "Если не уверен в точном чувстве — не угадывай жёстко. Дай 2-3 бережных варианта:\n"
+        "«Я могу ошибаться: тут больше обида, одиночество или страх?»\n"
+        "АНТИОБЩНОСТЬ: не спрашивай про «отношения вообще», «баланс», «смысл» и "
+        "«что между вами происходит», пока не заземлил разговор в одном живом фрагменте.\n"
+        "Лестница глубины: 1) что произошло, 2) что внутри в тот момент, "
+        "3) чего человек испугался или что это сказало ему о связи, 4) чего ему хотелось "
+        "именно от партнёра. За один ход — только ОДНА ступень.\n"
+        "Работай как скрытый EFT/NVC-lite каркас: вторичная реакция → первичное переживание →\n"
+        "потребность → живая просьба. Не называй метод. Просто веди туда естественно.\n"
+        "Если в реплике есть «всегда/никогда/опять/тяжело/не то» — сначала сузь до "
+        "конкретного эпизода или конкретного внутреннего момента, а не задавай большой "
+        "абстрактный вопрос.\n"
         "Варианты углубления (чередуй, не повторяй):\n"
         "— «В какой момент вчера это было особенно остро?» (конкретная ситуация)\n"
         "— «Когда он(а) так делает — что внутри первое? Злость, обида, страх?» (первичная эмоция)\n"
-        "— «Что тебе больше всего хочется услышать от него/неё?» (потребность)\n"
-        "— «Как это было в семье, где ты вырос(ла)?» (паттерн)\n"
+        "— «В ту секунду о чём это для тебя? Что тебя как будто пронзает?» (смысл момента)\n"
+        "— «Чего тебе больше всего хотелось бы от него/неё именно в этот момент?» (потребность)\n"
+        "— «Что ты в этом круге каждый раз теряешь?» (цена паттерна)\n"
         "НЕ предлагай шаги, решения, действия, ритуалы, договорённости. Это не твоя задача сейчас.\n"
         "ЕСЛИ ТОЛЬКО ЧТО ВЕРНУЛСЯ ИЗ OPTIONS (отказ от шага) — НЕ возвращайся к OPTIONS\n"
         "в ближайшие 4 хода. Копай глубже в чувства.\n"
@@ -363,10 +437,16 @@ STATE_GUIDELINES: dict[str, str] = {
         "  'Звучит так, будто тебе важно чувствовать, что тебя замечают'\n"
         "— [скрытое] Генерализация ('всегда', 'никогда') → сузь до эпизода:\n"
         "  'Вспомни последний раз — что именно произошло?'\n"
+        "— [мягкое] Неясно, что именно за чувством → калибруй через варианты:\n"
+        "  'Я могу ошибаться: тут больше про обиду, одиночество или бессилие?'\n"
+        "  НЕ используй это в каждом ходе — только когда без калибровки есть риск додумать лишнее.\n"
         "— [скрытое] Один сказал уязвимое, второй не отреагировал → мост-проверка:\n"
+        "  ТОЛЬКО после 2+ углубляющих ходов с тем, кто раскрылся.\n"
         "  'Он говорит, что ему страшно. Что ты слышишь — упрёк или просьбу?'\n"
         "— [скрытое] Обвинение с болью за ним → переведи в уязвимость:\n"
         "  'За словами «тебе плевать» слышится: «мне страшно, что я не нужна». Это ближе?'\n"
+        "— [скрытое] Пара снова заходит в один и тот же сюжет → назови цену круга:\n"
+        "  'Когда это повторяется, что каждый из вас в этот момент теряет — контакт, уважение, чувство опоры?'\n"
         "— [мягкое] Один не слышит другого → мягко проверь понимание:\n"
         "  'Что до тебя сейчас дошло из его/её слов?'\n"
         "  'Как тебе это слышится?'\n"
@@ -379,10 +459,13 @@ STATE_GUIDELINES: dict[str, str] = {
         "  НЕ используй: 'замечаю цикл', 'паттерн', 'повторяющийся' — это звучит как терапия.\n"
         "\n"
         "HANDOFF: в DEEPEN addressed_to=BOTH ЗАПРЕЩЁН. Адресуй тому, кого углубляешь.\n"
-        "Переключение на второго — НУЖНО и ВАЖНО, когда текущий дал ясный ответ:\n"
-        "подтверждение, короткий ответ, «да/нет», или назвал свою потребность.\n"
-        "Мост-фраза: «Она говорит X. Что ты слышишь в этих словах?»\n"
-        "Не держись за одного — второй тоже должен быть услышан.\n"
+        "ПРИОРИТЕТ в DEEPEN: сначала удержать боль и переживание, потом уже передавать слово.\n"
+        "После уязвимой, длинной или спутанной реплики дай этому же человеку минимум 2 углубляющих хода.\n"
+        "Переключение на второго допустимо только после 2+ углубляющих ходов И только если текущий уже\n"
+        "назвал чувство/потребность, а ответ стал короче и яснее.\n"
+        "Если сомневаешься — НЕ переключайся. Лучше ещё один точный углубляющий вопрос тому же партнёру.\n"
+        "Мост-фраза ко второму — это поздний ход, а не первый рефлекс.\n"
+        "Пример моста: «Она говорит X. Что ты слышишь в этих словах?»\n"
         "Когда потребность названа → CLARIFY (нужно понимание). OPTIONS — только если "
         "сервер разрешит (оба услышаны + конфликт назван)."
     ),
@@ -399,9 +482,16 @@ STATE_GUIDELINES: dict[str, str] = {
         "ШАГИ ДОЛЖНЫ ВЫТЕКАТЬ ИЗ КОНКРЕТНОЙ БОЛИ, которую назвали в DEEPEN.\n"
         "НЕ предлагай шаблонные шаги: «маленький шаг», «ритуал», «время себе»,\n"
         "«один вечер», «созвон», «контакт на неделе». Это canned phrases.\n"
+        "Шаг может быть ПАРНЫМ или ЛИЧНЫМ, но он должен улучшать именно контакт в паре.\n"
+        "Парный шаг: короткий repair-ритуал прямо в момент напряжения.\n"
+        "Личный шаг: заметить свой триггер, назвать первичное чувство, попросить паузу\n"
+        "с понятным временем возврата к разговору.\n"
         "Хороший шаг — это ПОВЕДЕНЧЕСКИЙ ЭКСПЕРИМЕНТ: что конкретно сделать, когда, как.\n"
         "Пример: «Завтра вечером: один говорит 3 минуты без перебиваний,\n"
         "второй пересказывает. Потом меняетесь.»\n"
+        "Ещё пример repair-шага: «Когда замечаете знакомый круг, один говорит:\n"
+        "„мне важно не спорить, а не потерять тебя“, второй отвечает: „я услышал,\n"
+        "дай мне 10 минут и я вернусь“.»\n"
         "ЕСЛИ ПАРТНЁР ОТВЕРГАЕТ ШАГИ — НЕ предлагай новые. Скажи:\n"
         "«Значит, мы ещё не дошли до сути. Что за этим стоит?» → DEEPEN.\n"
         "Если уже был отказ от шагов или похожее предложение недавно провалилось — не повторяй action cycle, "
@@ -413,13 +503,16 @@ STATE_GUIDELINES: dict[str, str] = {
         "АДРЕСАЦИЯ (ОБЯЗАТЕЛЬНО): addressed_to=\"BOTH\", next_speaker=\"BOTH\".\n"
         "ЗАПРЕЩЕНО: addressed_to=\"A\" или addressed_to=\"B\" в AGREE.\n"
         "Зафиксируй договорённость: кто, что, когда.\n"
+        "Если шаг личный — уточни, как второй поймёт, что контакт не потерян.\n"
+        "Если шаг repair-ориентированный — зафиксируй точную фразу или сигнал, а не общую идею.\n"
         "Обращайся к обоим: «Вы договорились...», «Итого: {имя_a} делает X, {имя_b} делает Y».\n"
         "НЕ начинай сообщение с имени одного партнёра.\n"
         "Когда оба подтвердили → CHECK_IN."
     ),
     "CHECK_IN": (
         "Функция: УСЛЫШАТЬ. Одно действие на этот ход:\n"
-        "Спроси: «Как прошло? От 1 до 10» (предложи addressed_to='BOTH').\n"
+        "Спроси: «Как прошло? От 1 до 10» или «Что сработало, а где сорвалось?» "
+        "(предложи addressed_to='BOTH').\n"
         "Любой результат нормальный.\n"
         "Дальше → SETUP (новая тема), DEEPEN (глубже), OPTIONS (скорректировать)."
     ),
@@ -477,18 +570,150 @@ RESPONSE_SCHEMA = {
     },
 }
 
+SESSION_INSIGHT_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "session_insight",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string"},
+                "clarified_text": {"type": "string"},
+                "agreement_text": {"type": "string"},
+                "summary_text": {"type": "string"},
+            },
+            "required": ["topic", "clarified_text", "agreement_text", "summary_text"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+_CYRILLIC_NAME_MAP = {
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ё": "yo",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "kh",
+    "ц": "ts",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "shch",
+    "ы": "y",
+    "э": "e",
+    "ю": "yu",
+    "я": "ya",
+    "ь": "",
+    "ъ": "",
+}
+_LATIN_NAME_MULTI = (
+    ("shch", "щ"),
+    ("zh", "ж"),
+    ("kh", "х"),
+    ("ts", "ц"),
+    ("ch", "ч"),
+    ("sh", "ш"),
+)
+_LATIN_NAME_SINGLE = {
+    "a": "а",
+    "b": "б",
+    "c": "к",
+    "d": "д",
+    "e": "е",
+    "f": "ф",
+    "g": "г",
+    "h": "х",
+    "i": "и",
+    "j": "й",
+    "k": "к",
+    "l": "л",
+    "m": "м",
+    "n": "н",
+    "o": "о",
+    "p": "п",
+    "q": "к",
+    "r": "р",
+    "s": "с",
+    "t": "т",
+    "u": "у",
+    "v": "в",
+    "w": "в",
+    "x": "кс",
+    "y": "ы",
+    "z": "з",
+}
+
+
+def _transliterate_name_to_latin(value: str) -> str:
+    return "".join(_CYRILLIC_NAME_MAP.get(ch, ch) for ch in value.lower())
+
+
+def _transliterate_name_to_cyrillic(value: str) -> str:
+    transliterated = value.lower()
+    transliterated = re.sub(r"([bcdfghjklmnpqrstvwxyz])ya", r"\1я", transliterated)
+    transliterated = re.sub(r"([bcdfghjklmnpqrstvwxyz])yu", r"\1ю", transliterated)
+    transliterated = re.sub(r"([bcdfghjklmnpqrstvwxyz])yo", r"\1ё", transliterated)
+    transliterated = re.sub(r"([bcdfghjklmnpqrstvwxyz])ye", r"\1е", transliterated)
+    for latin, cyr in _LATIN_NAME_MULTI:
+        transliterated = transliterated.replace(latin, cyr)
+    return "".join(_LATIN_NAME_SINGLE.get(ch, ch) for ch in transliterated)
+
+
+def _name_variants(name: str) -> set[str]:
+    cleaned = " ".join(name.strip().split())
+    if not cleaned:
+        return set()
+    first_token = re.split(r"[\s,;/|]+", cleaned, maxsplit=1)[0]
+    variants = {cleaned, first_token}
+    expanded: set[str] = set()
+    for item in variants:
+        if not item:
+            continue
+        expanded.add(item)
+        expanded.add(_transliterate_name_to_latin(item))
+        expanded.add(_transliterate_name_to_cyrillic(item))
+    return {variant for variant in expanded if variant}
+
 
 class ClaudeService:
+    MAX_CONSECUTIVE_BOTH_TURNS = 2
+
     def __init__(self) -> None:
         self._client = AsyncOpenAI(api_key=settings.openai_api_key)
 
     @staticmethod
     def _starts_with_partner_name(message: str, partner_name: str) -> bool:
-        normalized_message = message.strip().lower()
-        normalized_name = partner_name.strip().lower()
-        if not normalized_name:
+        stripped = message.strip()
+        candidates = sorted(_name_variants(partner_name), key=len, reverse=True)
+        if not stripped or not candidates:
             return False
-        return normalized_message.startswith(f"{normalized_name},") or normalized_message.startswith(f"{normalized_name}:")
+        for candidate in candidates:
+            prefix_pattern = rf"(^|[.!?\n]\s*){re.escape(candidate)}\s*[:,]"
+            suffix_vocative_pattern = rf"[,;:]\s*{re.escape(candidate)}\s*(?:[?!.]|$)"
+            if (
+                re.search(prefix_pattern, stripped, flags=re.IGNORECASE)
+                or re.search(suffix_vocative_pattern, stripped, flags=re.IGNORECASE)
+            ):
+                return True
+        return False
 
     async def _with_retry(self, operation: str, func, *, session_id: str | None = None):
         last_error: Exception | None = None
@@ -585,15 +810,55 @@ class ClaudeService:
         # In OPTIONS/AGREE/CHECK_IN — always allow (and encourage) BOTH
         both_allowed_states = ("OPTIONS", "AGREE", "CHECK_IN")
         is_both_state = effective_state in both_allowed_states
+        recent_joint_turns = self._recent_consecutive_joint_turns(messages or [])
+        force_exit_both = (
+            session.waiting_for == "BOTH"
+            and not is_both_state
+            and recent_joint_turns >= self.MAX_CONSECUTIVE_BOTH_TURNS
+        )
+        joint_mode_hint = ""
 
         if session.waiting_for == "BOTH":
-            addressing_rule = (
-                f"РЕЖИМ BOTH — оба партнёра отвечают:\n"
-                f"  addressed_to=\"BOTH\", next_speaker=\"BOTH\".\n"
-                f"  Обращайся к обоим: «Вы оба...», «Каждый из вас...».\n"
-                f"  НЕ начинай сообщение с имени одного партнёра.\n"
-                f"  НЕ задавай разные вопросы каждому отдельно.\n"
-            )
+            if is_both_state:
+                addressing_rule = (
+                    f"РЕЖИМ BOTH — оба партнёра отвечают:\n"
+                    f"  addressed_to=\"BOTH\", next_speaker=\"BOTH\".\n"
+                    f"  Обращайся к обоим: «Вы оба...», «Каждый из вас...».\n"
+                    f"  НЕ начинай сообщение с имени одного партнёра.\n"
+                    f"  НЕ задавай разные вопросы каждому отдельно.\n"
+                )
+            else:
+                if recent_joint_turns >= 1:
+                    joint_mode_hint = (
+                        f"⚠ BOF/BOTH LIMIT: уже {recent_joint_turns} совместный цикл ответа подряд.\n"
+                        f"  Вне OPTIONS/AGREE/CHECK_IN режим BOTH должен быть коротким коридором.\n"
+                        f"  Не задавай широкий общий вопрос про «вас двоих вообще».\n"
+                    )
+                if force_exit_both:
+                    focus_label = self._preferred_focus_speaker_after_joint(session, messages or [])
+                    focus_name = name_a if focus_label == "A" else name_b
+                    other_name = name_b if focus_label == "A" else name_a
+                    addressing_rule = (
+                        f"⚠ ОБЯЗАТЕЛЬНЫЙ ВЫХОД ИЗ BOTH:\n"
+                        f"  Совместный режим уже повторился {recent_joint_turns} раз(а).\n"
+                        f"  НЕЛЬЗЯ задавать ещё один общий вопрос обоим.\n"
+                        f"  Выбери одного партнёра как следующий фокус: по умолчанию {focus_name}.\n"
+                        f"  addressed_to=\"{focus_label}\", next_speaker=\"{focus_label}\".\n"
+                        f"  Сообщение начинай с «{focus_name},».\n"
+                        f"  Задай один точный вопрос только {focus_name}.\n"
+                        f"  Для отражения слов {other_name} — используй третье лицо.\n"
+                        f"  ЗАПРЕЩЕНО: «Вы оба...», «Каждый из вас...», «Что для вас обоих...», "
+                        f"«Какой первый шаг для вас двоих...».\n"
+                    )
+                else:
+                    addressing_rule = (
+                        f"РЕЖИМ BOTH — короткий совместный коридор:\n"
+                        f"  addressed_to=\"BOTH\", next_speaker=\"BOTH\" допустим только для одного краткого joint-хода.\n"
+                        f"  Либо коротко назови общую тему/столкновение, либо быстро выведи разговор к одному партнёру.\n"
+                        f"  НЕ задавай широкий общий вопрос про отношения вообще.\n"
+                        f"  НЕ задавай разные вопросы каждому отдельно.\n"
+                        f"  НЕ начинай сообщение с имени одного партнёра, если оставляешь BOTH.\n"
+                    )
         elif session.waiting_for == "A":
             if is_both_state:
                 addressing_rule = (
@@ -639,6 +904,7 @@ class ClaudeService:
         last_answer_hint = ""
         repetition_warning = ""
         feedback_hint = ""
+        grounding_hint = ""
         if messages:
             handoff_ctx = self._recent_handoff_context(messages)
             if address_feedback and feedback_target in ("A", "B"):
@@ -677,8 +943,32 @@ class ClaudeService:
                 other_label = "B" if last_speaker_label == "A" else "A"
                 word_count = len(last_text.split())
                 is_vulnerable = self._last_user_message_is_vulnerable(messages)
+                needs_grounding = self._last_user_message_needs_grounding(messages)
+                hold_reason = self._pre_generation_hold_reason(messages, effective_state)
                 can_natural_switch = self._should_natural_switch_short_answer(messages, effective_state)
-                if is_vulnerable:
+                if needs_grounding:
+                    grounding_hint = (
+                        f"⚠ АНТИОБЩНОСТЬ: последняя реплика {last_name} пока звучит слишком обобщённо или размыто.\n"
+                        f"  НЕ задавай мета-вопросы вроде «что это для тебя значит?» или «как вы это видите?».\n"
+                        f"  Сузь следующий ход до одного живого фрагмента: последнего эпизода, конкретной фразы,\n"
+                        f"  секунды перед вспышкой или того, что кольнуло сильнее всего.\n"
+                    )
+                if hold_reason and not is_both_state:
+                    reason_label = "уязвимое/эмоциональное" if hold_reason == "vulnerable" else "safety-adjacent / с оттенком давления"
+                    last_answer_hint = (
+                        f"Последний ответ {last_name}: {reason_label} содержание ({word_count} слов) "
+                        f"→ побудь с ним ещё один deepen-ход.\n"
+                    )
+                    addressing_rule = (
+                        f"⚠ ЖЁСТКОЕ УДЕРЖАНИЕ ФОКУСА:\n"
+                        f"  Последний ход {last_name} содержит {reason_label} содержание.\n"
+                        f"  СЛЕДУЮЩИЙ ответ ОБЯЗАТЕЛЬНО адресуй {last_name}.\n"
+                        f"  addressed_to=\"{last_speaker_label}\", next_speaker=\"{last_speaker_label}\".\n"
+                        f"  НЕЛЬЗЯ сейчас мостить к {other_name}.\n"
+                        f"  НЕЛЬЗЯ сейчас задавать вопрос {other_name}.\n"
+                        f"  Сначала удержи переживание {last_name} ещё один ход, потом уже решай вопрос handoff.\n"
+                    )
+                elif is_vulnerable:
                     last_answer_hint = f"Последний ответ {last_name}: уязвимый/эмоциональный ({word_count} слов) → побудь с ним.\n"
                 elif word_count <= 8 and not is_both_state and can_natural_switch:
                     last_answer_hint = (
@@ -750,6 +1040,8 @@ class ClaudeService:
             + resume_block
             + "\n"
             + last_answer_hint
+            + joint_mode_hint
+            + grounding_hint
             + consecutive_info
             + repetition_warning
             + feedback_hint
@@ -833,6 +1125,71 @@ class ClaudeService:
         return cls._contains_any(text, vulnerability_markers)
 
     @classmethod
+    def _last_user_message_is_safety_adjacent(cls, messages: list[dict]) -> bool:
+        """Heuristic: softer control / pressure / minimization patterns that need extra sensitivity."""
+        turns = cls._recent_user_turns(messages, limit=1)
+        if not turns:
+            return False
+        _, text = turns[0]
+        safety_adjacent_markers = (
+            "мне спокойнее, если ты", "мне спокойнее если ты",
+            "мне спокойнее если ты", "если ты никуда не пойдешь",
+            "лучше побудь дома", "я должен знать где ты",
+            "знать где ты и с кем", "следишь за телефоном",
+            "твоя жизнь сжимается", "жизнь сжимается",
+            "после всего что я для тебя", "если любишь ты бы",
+            "ты преувеличиваешь", "ничего страшного",
+            "на цыпочках", "чтобы мне было спокойнее",
+            "не запрещаю тебе", "моя жизнь сжимается",
+        )
+        return cls._contains_any(text, safety_adjacent_markers)
+
+    @classmethod
+    def _last_user_message_needs_grounding(cls, messages: list[dict]) -> bool:
+        """Detect broad / blurry user phrasing that needs a more concrete next question."""
+        turns = cls._recent_user_turns(messages, limit=1)
+        if not turns:
+            return False
+        _, text = turns[0]
+        normalized = cls._normalize_text(text)
+        if len(normalized.split()) <= 3:
+            return False
+
+        has_generic_signal = cls._contains_any(text, cls._GROUNDING_REQUIRED_MARKERS)
+        has_specific_anchor = (
+            cls._contains_any(text, cls._SPECIFIC_MOMENT_MARKERS)
+            or any(char.isdigit() for char in text)
+            or "«" in text
+            or "»" in text
+            or "\"" in text
+        )
+        return has_generic_signal and not has_specific_anchor
+
+    @classmethod
+    def _pre_generation_hold_reason(
+        cls,
+        messages: list[dict],
+        effective_state: str,
+    ) -> str | None:
+        """Force one more same-speaker deepen turn before generation when hold is still too shallow."""
+        if effective_state in ("OPTIONS", "AGREE", "CHECK_IN", "SETUP"):
+            return None
+
+        last_speaker = cls._last_user_speaker(messages)
+        if last_speaker not in ("A", "B"):
+            return None
+
+        consec_count, consec_speaker = cls._consecutive_same_speaker(messages)
+        if consec_count >= 2 and consec_speaker == last_speaker:
+            return None
+
+        if cls._last_user_message_is_safety_adjacent(messages):
+            return "safety_adjacent"
+        if cls._last_user_message_is_vulnerable(messages):
+            return "vulnerable"
+        return None
+
+    @classmethod
     def _should_natural_switch_short_answer(cls, messages: list[dict], effective_state: str) -> bool:
         """Avoid switching too early in DEEPEN after the first short reply."""
         if effective_state != "DEEPEN":
@@ -851,6 +1208,11 @@ class ClaudeService:
         if not match:
             return None
         return match.group(1), match.group(2).strip()
+
+    @staticmethod
+    def _extract_joint_subturns(text: str) -> list[tuple[str, str]]:
+        pattern = re.compile(r"^\[(A|B)\]:\s*(.*?)(?=^\[(?:A|B)\]:|\Z)", re.MULTILINE | re.DOTALL)
+        return [(match.group(1), match.group(2).strip()) for match in pattern.finditer(text)]
 
     @classmethod
     def _recent_user_turns(cls, messages: list[dict], limit: int = 2) -> list[tuple[str, str]]:
@@ -872,14 +1234,74 @@ class ClaudeService:
         return any(marker in normalized for marker in markers)
 
     @classmethod
+    def _recent_consecutive_joint_turns(cls, messages: list[dict]) -> int:
+        count = 0
+        for item in reversed(messages):
+            if item.get("role") != "user":
+                continue
+            parsed = cls._extract_user_turn(item.get("content", ""))
+            if parsed is None:
+                continue
+            speaker, _ = parsed
+            if speaker != "BOTH":
+                break
+            count += 1
+        return count
+
+    @classmethod
+    def _preferred_focus_speaker_after_joint(cls, session: SessionState, messages: list[dict]) -> str:
+        turns = cls._recent_user_turns(messages, limit=1)
+        if not turns:
+            return "A"
+        speaker, text = turns[0]
+        if speaker in ("A", "B"):
+            return speaker
+
+        subturns = dict(cls._extract_joint_subturns(text))
+        best_label = "A"
+        best_score = -1
+        best_words = -1
+        for label in ("A", "B"):
+            part = subturns.get(label, "")
+            if not part:
+                continue
+            score = 0
+            if cls._contains_any(part, cls._VULNERABILITY_MARKERS):
+                score += 4
+            if cls._contains_any(part, cls._SAFETY_ADJACENT_MARKERS):
+                score += 3
+            if cls._contains_any(part, cls._GROUNDING_REQUIRED_MARKERS):
+                score += 1
+            words = len(part.split())
+            if score > best_score or (score == best_score and words > best_words):
+                best_label = label
+                best_score = score
+                best_words = words
+        return best_label
+
+    @classmethod
     def _should_force_clarify(cls, messages: list[dict]) -> bool:
         turns = cls._recent_user_turns(messages)
-        if len(turns) < 2:
+        if not turns:
             return False
 
-        (sender_a, text_a), (sender_b, text_b) = turns
-        if sender_a == sender_b or sender_a == "BOTH" or sender_b == "BOTH":
-            return False
+        text_a = ""
+        text_b = ""
+        if len(turns) >= 2:
+            (sender_a, text_a), (sender_b, text_b) = turns[-2], turns[-1]
+            if sender_a == sender_b or sender_a == "BOTH" or sender_b == "BOTH":
+                text_a = ""
+                text_b = ""
+
+        if not text_a or not text_b:
+            last_sender, last_text = turns[-1]
+            if last_sender != "BOTH":
+                return False
+            subturns = dict(cls._extract_joint_subturns(last_text))
+            text_a = subturns.get("A", "")
+            text_b = subturns.get("B", "")
+            if not text_a or not text_b:
+                return False
 
         need_markers = ("хочу", "нужно", "нужна", "нужен", "важно", "чувств", "боюсь", "не хватает")
         space_markers = ("пространств", "свобод", "задыха", "зажат", "давит", "в своем")
@@ -903,10 +1325,36 @@ class ClaudeService:
             if item.get("role") == "user":
                 parsed = cls._extract_user_turn(item.get("content", ""))
                 if parsed is not None:
-                    count += 1
+                    speaker, text = parsed
+                    if speaker == "BOTH":
+                        subturns = cls._extract_joint_subturns(text)
+                        count += len(subturns) if subturns else 1
+                    else:
+                        count += 1
         return count
 
     # Canned intervention patterns for repetition detection
+    _VULNERABILITY_MARKERS: tuple[str, ...] = (
+        "больно", "страшно", "одинок", "одинок", "плачу", "плакал",
+        "не нужн", "брошен", "невидим", "не слыш", "не замеча",
+        "устал", "не могу больше", "хочу уйти", "разлюбил",
+        "не люб", "предал", "обидно", "стыдно", "виноват",
+        "боюсь", "теряю", "потеря", "пустота", "безнадежн",
+        "не знаю как жить", "не вижу смысл",
+        "тяжело", "неприятно", "плохо", "бесит", "достало",
+        "надоело", "никогда меня не", "всегда ты",
+    )
+    _SAFETY_ADJACENT_MARKERS: tuple[str, ...] = (
+        "мне спокойнее, если ты", "мне спокойнее если ты",
+        "мне спокойнее если ты", "если ты никуда не пойдешь",
+        "лучше побудь дома", "я должен знать где ты",
+        "знать где ты и с кем", "следишь за телефоном",
+        "твоя жизнь сжимается", "жизнь сжимается",
+        "после всего что я для тебя", "если любишь ты бы",
+        "ты преувеличиваешь", "ничего страшного",
+        "на цыпочках", "чтобы мне было спокойнее",
+        "не запрещаю тебе", "моя жизнь сжимается",
+    )
     _CANNED_INTERVENTION_MARKERS: tuple[str, ...] = (
         "маленький шаг", "на этой неделе", "готовы попробовать",
         "один вечер", "время себе", "созвон", "ритуал",
@@ -917,6 +1365,20 @@ class ClaudeService:
         "похоже, тебе важно", "что стоит за этим", "это нормально",
         "давай притормозим", "как ты себя сейчас чувствуешь",
         "что ты слышишь в", "как это для тебя",
+        "что это для тебя значит", "как вы это видите",
+        "что между вами происходит", "как найти баланс",
+    )
+    _GROUNDING_REQUIRED_MARKERS: tuple[str, ...] = (
+        "всегда", "никогда", "постоянно", "вечно", "обычно", "все время",
+        "каждый раз", "опять", "одно и то же", "как будто", "что-то",
+        "как-то", "тяжело", "сложно", "плохо", "бесит", "не то",
+        "не помогает", "мимо",
+    )
+    _SPECIFIC_MOMENT_MARKERS: tuple[str, ...] = (
+        "вчера", "сегодня", "утром", "вечером", "ночью", "днем",
+        "только что", "сейчас", "в тот момент", "в эту секунду",
+        "после", "перед", "когда", "последний раз", "в прошлый раз",
+        "сказал", "сказала", "написал", "написала",
     )
 
     # Soft MI markers for cooldown detection (MI-5, MI-7, MI-8)
@@ -1102,6 +1564,19 @@ class ClaudeService:
         return "CLARIFY" if cls._should_force_clarify(messages) else "DEEPEN"
 
     def _resolve_effective_state(self, session: SessionState, messages: list[dict]) -> str:
+        if (
+            session.dialogue_state == "SETUP"
+            and self._recent_consecutive_joint_turns(messages) >= self.MAX_CONSECUTIVE_BOTH_TURNS
+        ):
+            fallback_state = self._fallback_state_from_messages(messages)
+            log.info(
+                "setup_both_limit_reached",
+                session_id=session.session_id,
+                original_state=session.dialogue_state,
+                effective_state=fallback_state,
+            )
+            return fallback_state
+
         if self._should_force_clarify(messages):
             log.info(
                 "forced_clarify_two_sided_conflict",
@@ -1347,6 +1822,23 @@ class ClaudeService:
                 next_speaker = last_speaker
                 addressed_to = last_speaker
                 server_handoff_override = True
+
+        # Post-response guard: exit sticky BOTH after repeated joint setup cycles
+        if (
+            next_speaker == "BOTH"
+            and effective_state not in ("OPTIONS", "AGREE", "CHECK_IN")
+            and self._recent_consecutive_joint_turns(messages) >= self.MAX_CONSECUTIVE_BOTH_TURNS
+        ):
+            forced_speaker = self._preferred_focus_speaker_after_joint(session, messages)
+            log.info(
+                "post_guard_forced_exit_both_limit",
+                session_id=session.session_id,
+                effective_state=effective_state,
+                forced_speaker=forced_speaker,
+            )
+            next_speaker = forced_speaker
+            addressed_to = forced_speaker
+            server_handoff_override = True
 
         # Post-response guard: block BOTH after vulnerability (not in OPTIONS/AGREE/CHECK_IN)
         if (next_speaker == "BOTH"
@@ -1607,6 +2099,65 @@ class ClaudeService:
         if not response.choices:
             return "Данных для резюме недостаточно."
         return response.choices[0].message.content or ""
+
+    async def generate_session_insight(self, session: SessionState, repo) -> dict[str, str]:
+        """Generate a structured session insight for /progress and post-session recap."""
+        history = await self._get_history(session.session_id, repo)
+        if not history:
+            return {
+                "topic": "Итог разговора",
+                "clarified_text": "Данных для подробного итога недостаточно.",
+                "agreement_text": "Договорённость не зафиксирована.",
+                "summary_text": "Данных для итога разговора недостаточно.",
+            }
+
+        prompt = (
+            "На основе этого диалога составь структурированный итог разговора пары.\n"
+            "Верни JSON строго по схеме.\n\n"
+            "Правила:\n"
+            "- topic: короткая тема разговора, до 7 слов\n"
+            "- clarified_text: 1-2 предложения, что стало яснее или что удалось услышать\n"
+            "- agreement_text: 1 предложение о договорённости или следующем шаге; "
+            "если договорённости нет, так и напиши\n"
+            "- summary_text: тёплый нейтральный итог для отправки в чат, до 120 слов, без советов и оценок"
+        )
+
+        try:
+            response = await self._with_retry(
+                "generate_session_insight",
+                lambda: self._client.chat.completions.create(
+                    model=MODEL,
+                    max_tokens=500,
+                    timeout=settings.openai_timeout_seconds,
+                    response_format=SESSION_INSIGHT_SCHEMA,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        *history,
+                        {"role": "user", "content": prompt},
+                    ],
+                ),
+                session_id=session.session_id,
+            )
+            if not response.choices:
+                raise ValueError("empty insight response")
+
+            raw = response.choices[0].message.content or ""
+            data = json.loads(raw)
+            return {
+                "topic": (data.get("topic") or "Итог разговора").strip(),
+                "clarified_text": (data.get("clarified_text") or "Удалось лучше понять позиции друг друга.").strip(),
+                "agreement_text": (data.get("agreement_text") or "Договорённость не зафиксирована.").strip(),
+                "summary_text": (data.get("summary_text") or "Итог разговора сохранён.").strip(),
+            }
+        except Exception:
+            log.exception("session_insight_generation_failed", session_id=session.session_id)
+            fallback = await self.generate_summary(session, repo)
+            return {
+                "topic": "Итог разговора",
+                "clarified_text": "Удалось пройти через разговор и собрать общий итог.",
+                "agreement_text": "Смотрите общий итог ниже.",
+                "summary_text": fallback,
+            }
 
 
 class OpenAIServiceError(Exception):

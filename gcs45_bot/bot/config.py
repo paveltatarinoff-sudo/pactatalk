@@ -1,3 +1,6 @@
+import json
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,6 +11,7 @@ class Settings(BaseSettings):
     bot_token: str
     payment_provider_token: str = ""
     admin_ids: list[int] = []
+    support_inbox_ids: list[int] = []
 
     # AI
     openai_api_key: str = ""
@@ -29,6 +33,35 @@ class Settings(BaseSettings):
     openai_retry_base_delay_seconds: float = 1.5
     user_response_timeout_seconds: int = 60 * 30
     timeout_check_interval_seconds: int = 60
+    post_session_survey_url: str = ""
+
+    @classmethod
+    def _parse_id_list(cls, value):
+        if value in (None, "", []):
+            return []
+        if isinstance(value, int):
+            return [value]
+        if isinstance(value, list):
+            return [int(item) for item in value]
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return []
+            if raw.startswith("["):
+                parsed = json.loads(raw)
+                return [int(item) for item in parsed]
+            return [int(item.strip()) for item in raw.split(",") if item.strip()]
+        return value
+
+    @field_validator("admin_ids", mode="before")
+    @classmethod
+    def parse_admin_ids(cls, value):
+        return cls._parse_id_list(value)
+
+    @field_validator("support_inbox_ids", mode="before")
+    @classmethod
+    def parse_support_inbox_ids(cls, value):
+        return cls._parse_id_list(value)
 
     @property
     def is_production(self) -> bool:

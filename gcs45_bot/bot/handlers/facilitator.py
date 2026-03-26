@@ -20,13 +20,20 @@ from bot.services.claude_service import MAX_MESSAGE_LENGTH, OpenAIServiceError
 from bot.services.resume_choice import (
     RESUME_CHOICE_ALIGNMENT_PENDING,
     RESUME_CHOICE_CONTINUE,
+    RESUME_CHOICE_NEW_TOPIC,
     get_resume_resolution,
+    get_alignment_replies,
     process_alignment_reply,
 )
 from bot.services.loop_guard import append_history_entry, maybe_build_loop_mode_shift
-from bot.services.session_service import SessionService
+from bot.services.session_service import (
+    SessionService,
+    format_bot_dialog_message,
+    format_participant_dialog_block,
+    format_participant_dialog_label,
+)
 from bot.services.shared import claude as _claude
-from bot.utils.keyboards import post_session_keyboard, end_session_keyboard, main_menu_keyboard
+from bot.utils.keyboards import post_session_keyboard, end_session_keyboard, end_session_button, main_menu_keyboard
 
 router = Router(name="facilitator")
 log = structlog.get_logger()
@@ -54,9 +61,67 @@ END_SESSION_INTENT_PATTERNS = (
     "остановимся",
     "хочу закончить",
     "хочу завершить",
+    "хотел бы закончить",
+    "хотел бы завершить",
+    "хотела бы закончить",
+    "хотела бы завершить",
+    "предлагаю закончить",
+    "предлагаю завершить",
+    "давай завершим",
+    "давайте завершим",
+    "на этом закончим",
+    "на этом завершим",
+    "не могу сейчас продолжать",
+    "не хочу сейчас продолжать",
+    "не готов сейчас продолжать",
+    "не готова сейчас продолжать",
+    "сейчас не могу продолжать",
+    "сейчас не хочу продолжать",
+    "хочу закончить на сегодня",
+    "хочу завершить на сегодня",
     "завершаем",
     "на сегодня все",
     "на сегодня всё",
+)
+END_SESSION_VERB_MARKERS = (
+    "заверш",
+    "законч",
+    "останов",
+    "закры",
+)
+END_SESSION_CONTEXT_MARKERS = (
+    "сесси",
+    "разговор",
+    "на сегодня",
+    "на этом",
+    "сейчас",
+)
+END_SESSION_DEFER_PATTERNS = (
+    "продолжим позже",
+    "давай продолжим позже",
+    "давайте продолжим позже",
+    "вернемся позже",
+    "вернемся к этому позже",
+    "вернемся к разговору позже",
+    "вернемся к этому потом",
+    "вернемся к разговору потом",
+    "вернемся к этой теме позже",
+    "вернемся к этой теме потом",
+    "поговорим позже",
+    "обсудим позже",
+    "давай потом",
+    "давайте потом",
+)
+END_SESSION_PAUSE_MARKERS = (
+    "не могу сейчас",
+    "не хочу сейчас",
+    "неудобно сейчас",
+    "неудобно продолжать",
+    "не готов продолжать",
+    "не готова продолжать",
+    "не готовы продолжать",
+    "сейчас не могу",
+    "сейчас неудобно",
 )
 END_SESSION_CONFIRM_YES_PATTERNS = (
     "да",
@@ -109,7 +174,57 @@ SETUP_TOPIC_SPLIT_GENERIC_TOKENS = {
     "который",
     "которая",
     "которые",
+    "готов",
+    "готова",
+    "готовы",
+    "участвовать",
+    "участвую",
+    "участие",
+    "сессия",
+    "сессии",
+    "пригласили",
+    "пригласил",
+    "пригласила",
+    "просто",
+    "любой",
+    "вариант",
+    "тема",
+    "темой",
+    "темах",
+    "важнее",
+    "удобнее",
+    "лучше",
+    "можно",
+    "разницы",
+    "знаю",
 }
+SETUP_TOPIC_SEED_SUMMARY_PREFIX = "setup_topic_seed:"
+SETUP_ANSWER_SPECIFIC_TOPIC = "specific_topic"
+SETUP_ANSWER_FLEXIBLE = "flexible"
+SETUP_ANSWER_META = "meta_participation"
+SETUP_ANSWER_UNCLEAR = "unclear"
+SETUP_FLEXIBLE_MARKERS = (
+    "без разницы",
+    "любой вариант",
+    "мне ок",
+    "как хотите",
+    "как скажете",
+    "какая будет тема",
+    "можно с любой темы",
+    "могу с любой темы",
+)
+SETUP_META_MARKERS = (
+    "готов участвовать",
+    "готова участвовать",
+    "готовы участвовать",
+    "участвовать в сессии",
+    "просто участвую",
+    "просто участвовать",
+    "меня пригласили",
+    "меня пригласил",
+    "меня пригласила",
+    "я здесь чтобы участвовать",
+)
 
 
 def _get_lock(session_id: str) -> asyncio.Lock:
@@ -163,13 +278,124 @@ def _normalize_text(value: str | None) -> str:
     return " ".join((value or "").strip().lower().replace("ё", "е").split())
 
 
+_CYRILLIC_NAME_MAP = {
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ё": "yo",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "kh",
+    "ц": "ts",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "shch",
+    "ы": "y",
+    "э": "e",
+    "ю": "yu",
+    "я": "ya",
+    "ь": "",
+    "ъ": "",
+}
+_LATIN_NAME_MULTI = (
+    ("shch", "щ"),
+    ("zh", "ж"),
+    ("kh", "х"),
+    ("ts", "ц"),
+    ("ch", "ч"),
+    ("sh", "ш"),
+)
+_LATIN_NAME_SINGLE = {
+    "a": "а",
+    "b": "б",
+    "c": "к",
+    "d": "д",
+    "e": "е",
+    "f": "ф",
+    "g": "г",
+    "h": "х",
+    "i": "и",
+    "j": "й",
+    "k": "к",
+    "l": "л",
+    "m": "м",
+    "n": "н",
+    "o": "о",
+    "p": "п",
+    "q": "к",
+    "r": "р",
+    "s": "с",
+    "t": "т",
+    "u": "у",
+    "v": "в",
+    "w": "в",
+    "x": "кс",
+    "y": "ы",
+    "z": "з",
+}
+
+
+def _transliterate_name_to_latin(value: str) -> str:
+    return "".join(_CYRILLIC_NAME_MAP.get(ch, ch) for ch in value.lower())
+
+
+def _transliterate_name_to_cyrillic(value: str) -> str:
+    transliterated = value.lower()
+    transliterated = re.sub(r"([bcdfghjklmnpqrstvwxyz])ya", r"\1я", transliterated)
+    transliterated = re.sub(r"([bcdfghjklmnpqrstvwxyz])yu", r"\1ю", transliterated)
+    transliterated = re.sub(r"([bcdfghjklmnpqrstvwxyz])yo", r"\1ё", transliterated)
+    transliterated = re.sub(r"([bcdfghjklmnpqrstvwxyz])ye", r"\1е", transliterated)
+    for latin, cyr in _LATIN_NAME_MULTI:
+        transliterated = transliterated.replace(latin, cyr)
+    return "".join(_LATIN_NAME_SINGLE.get(ch, ch) for ch in transliterated)
+
+
+def _name_variants(name: str) -> set[str]:
+    cleaned = " ".join(name.strip().split())
+    if not cleaned:
+        return set()
+    first_token = re.split(r"[\s,;/|]+", cleaned, maxsplit=1)[0]
+    variants = {cleaned, first_token}
+    expanded: set[str] = set()
+    for item in variants:
+        if not item:
+            continue
+        expanded.add(item)
+        expanded.add(_transliterate_name_to_latin(item))
+        expanded.add(_transliterate_name_to_cyrillic(item))
+    return {variant for variant in expanded if variant}
+
+
 def _starts_with_partner_name(message: str, name: str) -> bool:
-    stripped = (message or "").lstrip()
-    if not stripped or not name:
+    stripped = (message or "").strip()
+    candidates = sorted(_name_variants(name), key=len, reverse=True)
+    if not stripped or not candidates:
         return False
-    lowered = stripped.lower()
-    candidate = name.strip().lower()
-    return lowered.startswith(f"{candidate},") or lowered.startswith(f"{candidate}:")
+    for candidate in candidates:
+        prefix_pattern = rf"(^|[.!?\n]\s*){re.escape(candidate)}\s*[:,]"
+        suffix_vocative_pattern = rf"[,;:]\s*{re.escape(candidate)}\s*(?:[?!.]|$)"
+        if (
+            re.search(prefix_pattern, stripped, flags=re.IGNORECASE)
+            or re.search(suffix_vocative_pattern, stripped, flags=re.IGNORECASE)
+        ):
+            return True
+    return False
 
 
 def _detect_explicit_reply_addressee(session: SessionState, reply: str) -> str | None:
@@ -213,12 +439,34 @@ def _extract_topic_signal_tokens(text: str) -> set[str]:
     }
 
 
+def _classify_setup_opening_answer(text: str) -> str:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return SETUP_ANSWER_UNCLEAR
+    if any(marker in normalized for marker in SETUP_FLEXIBLE_MARKERS):
+        return SETUP_ANSWER_FLEXIBLE
+
+    tokens = _extract_topic_signal_tokens(text)
+    if tokens:
+        return SETUP_ANSWER_SPECIFIC_TOPIC
+
+    if any(marker in normalized for marker in SETUP_META_MARKERS):
+        return SETUP_ANSWER_META
+
+    return SETUP_ANSWER_UNCLEAR
+
+
 def _looks_like_setup_topic_split(text_a: str, text_b: str) -> bool:
     normalized_a = _normalize_text(text_a)
     normalized_b = _normalize_text(text_b)
     if not normalized_a or not normalized_b:
         return False
     if len(normalized_a) > 120 or len(normalized_b) > 120:
+        return False
+
+    if _classify_setup_opening_answer(text_a) != SETUP_ANSWER_SPECIFIC_TOPIC:
+        return False
+    if _classify_setup_opening_answer(text_b) != SETUP_ANSWER_SPECIFIC_TOPIC:
         return False
 
     tokens_a = _extract_topic_signal_tokens(text_a)
@@ -240,6 +488,53 @@ def _setup_topic_split_prompt() -> str:
         "Прежде чем идти дальше, напишите каждый коротко: "
         "<b>это одна общая тема с двух сторон или вам важно сначала выбрать одну тему?</b>\n"
         "Отвечайте независимо — я жду ответа от вас обоих."
+    )
+
+
+def _detect_setup_topic_seed(
+    text_a: str,
+    text_b: str,
+) -> tuple[str, str, str] | None:
+    kind_a = _classify_setup_opening_answer(text_a)
+    kind_b = _classify_setup_opening_answer(text_b)
+
+    if kind_a == SETUP_ANSWER_SPECIFIC_TOPIC and kind_b != SETUP_ANSWER_SPECIFIC_TOPIC:
+        return "A", text_a, kind_b
+    if kind_b == SETUP_ANSWER_SPECIFIC_TOPIC and kind_a != SETUP_ANSWER_SPECIFIC_TOPIC:
+        return "B", text_b, kind_a
+    return None
+
+
+def _setup_topic_seed_prompt(
+    session: SessionState,
+    *,
+    proposer_label: str,
+    topic_text: str,
+    other_kind: str,
+) -> str:
+    proposer_name = session.name_a if proposer_label == "A" else session.name_b
+    other_name = session.name_b if proposer_label == "A" else session.name_a
+    safe_topic_text = html.escape(topic_text.strip())
+
+    if other_kind == SETUP_ANSWER_FLEXIBLE:
+        other_line = (
+            f"{html.escape(other_name)}, ты пока не предлагаешь отдельную тему и готов(а) идти "
+            "с тем, что сейчас важнее."
+        )
+    elif other_kind == SETUP_ANSWER_META:
+        other_line = (
+            f"{html.escape(other_name)}, ты пока не предлагаешь отдельную тему и просто готов(а) "
+            "участвовать в разговоре."
+        )
+    else:
+        other_line = f"От {html.escape(other_name)} пока не прозвучала отдельная тема."
+
+    return (
+        f"Похоже, тему на старт сейчас предлагает {html.escape(proposer_name)}:\n"
+        f"<blockquote>{safe_topic_text}</blockquote>\n\n"
+        f"{other_line}\n\n"
+        "Если вам ок начать с этой темы, напишите каждый коротко: <b>да</b>.\n"
+        "Если кому-то важнее другая тема, напишите её в одной фразе."
     )
 
 
@@ -266,7 +561,25 @@ def _reply_extras(session: SessionState) -> tuple[str, object]:
 
 def _looks_like_end_session_intent(message: str) -> bool:
     normalized = _normalize_text(message)
-    return any(pattern in normalized for pattern in END_SESSION_INTENT_PATTERNS)
+    if any(pattern in normalized for pattern in END_SESSION_INTENT_PATTERNS):
+        return True
+
+    if (
+        any(marker in normalized for marker in END_SESSION_VERB_MARKERS)
+        and any(marker in normalized for marker in END_SESSION_CONTEXT_MARKERS)
+    ):
+        return True
+
+    if any(pattern in normalized for pattern in END_SESSION_DEFER_PATTERNS):
+        return True
+
+    if (
+        any(marker in normalized for marker in END_SESSION_PAUSE_MARKERS)
+        and any(pattern in normalized for pattern in END_SESSION_DEFER_PATTERNS)
+    ):
+        return True
+
+    return False
 
 
 def _looks_like_end_session_yes(message: str) -> bool:
@@ -286,12 +599,94 @@ async def _request_end_session_confirmation(
     bot: Bot,
 ) -> None:
     session.close_confirmation_pending = True
+    session.close_choice_active = False
+    session.close_continue_votes = ""
     await repo.save(session)
     await _svc(bot, repo).notify_both(
         session,
         "Похоже, вы хотите завершить сессию.\n\n"
         "Готовы закончить разговор сейчас? Ответьте коротко: <b>да</b> или <b>нет</b>.",
     )
+
+
+async def _clear_end_session_choice_buttons(session: SessionState, bot: Bot) -> None:
+    for chat_id, message_id, side in (
+        (session.user_a_id, session.close_choice_msg_id_a, "A"),
+        (session.user_b_id, session.close_choice_msg_id_b, "B"),
+    ):
+        if not message_id:
+            continue
+        try:
+            await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None)
+        except Exception:
+            log.warning(
+                "end_session_choice_clear_buttons_failed",
+                session_id=session.session_id,
+                side=side,
+                user_id=chat_id,
+                message_id=message_id,
+            )
+
+
+async def _present_end_session_choice(
+    *,
+    session: SessionState,
+    repo: SessionRepository,
+    bot: Bot,
+) -> None:
+    await _clear_end_session_choice_buttons(session, bot)
+    session.close_confirmation_pending = False
+    session.close_choice_active = True
+    session.close_continue_votes = ""
+    session.close_choice_msg_id_a = 0
+    session.close_choice_msg_id_b = 0
+
+    text = (
+        "Один из вас открыл завершение сессии.\n\n"
+        "Если хотите закончить сейчас, нажмите <b>«Завершить сессию»</b>.\n"
+        "Если хотите продолжить, нажмите <b>«Продолжить разговор»</b>."
+    )
+
+    for user_id, attr_name in (
+        (session.user_a_id, "close_choice_msg_id_a"),
+        (session.user_b_id, "close_choice_msg_id_b"),
+    ):
+        if not user_id:
+            continue
+        sent = await bot.send_message(user_id, text, reply_markup=end_session_keyboard())
+        setattr(session, attr_name, getattr(sent, "message_id", 0))
+
+    await repo.save(session)
+
+
+async def _present_direct_end_session_button(
+    *,
+    session: SessionState,
+    repo: SessionRepository,
+    bot: Bot,
+) -> None:
+    await _clear_end_session_choice_buttons(session, bot)
+    session.close_confirmation_pending = False
+    session.close_choice_active = True
+    session.close_continue_votes = ""
+    session.close_choice_msg_id_a = 0
+    session.close_choice_msg_id_b = 0
+
+    text = (
+        "Похоже, вы хотите закончить разговор на сегодня.\n\n"
+        "Если хотите завершить сессию сейчас, нажмите кнопку ниже."
+    )
+
+    for user_id, attr_name in (
+        (session.user_a_id, "close_choice_msg_id_a"),
+        (session.user_b_id, "close_choice_msg_id_b"),
+    ):
+        if not user_id:
+            continue
+        sent = await bot.send_message(user_id, text, reply_markup=end_session_button())
+        setattr(session, attr_name, getattr(sent, "message_id", 0))
+
+    await repo.save(session)
 
 
 async def _resolve_end_session_confirmation(
@@ -306,17 +701,13 @@ async def _resolve_end_session_confirmation(
         return False
 
     if _looks_like_end_session_yes(text):
-        session.close_confirmation_pending = False
-        await repo.save(session)
-        await _svc(bot, repo).notify_both(
-            session,
-            "Если вы точно хотите закончить сессию, нажмите кнопку ниже.",
-            reply_markup=end_session_keyboard(),
-        )
+        await _present_end_session_choice(session=session, repo=repo, bot=bot)
         return True
 
     if _looks_like_end_session_no(text):
         session.close_confirmation_pending = False
+        session.close_choice_active = False
+        session.close_continue_votes = ""
         await repo.save(session)
         await _svc(bot, repo).notify_both(
             session,
@@ -379,20 +770,78 @@ async def _maybe_apply_loop_mode_shift(
     )
 
 
-def _resume_continue_intro() -> str:
+def _extract_resume_field(resume_context: str, field_name: str) -> str:
+    prefix = f"{field_name}:"
+    for raw_line in resume_context.splitlines():
+        line = raw_line.strip()
+        if line.lower().startswith(prefix.lower()):
+            return line.split(":", 1)[1].strip()
+    return ""
+
+
+def _has_meaningful_resume_field(value: str) -> bool:
+    normalized = value.strip().strip(".")
+    if not normalized:
+        return False
+    return normalized.lower() not in {"нет", "не указано", "-", "—", "n/a"}
+
+
+def _resume_continue_intro(session: SessionState) -> str:
+    stopping_point = _extract_resume_field(session.resume_context, "Где остановились")
+    unresolved = _extract_resume_field(session.resume_context, "Что осталось недосказанным")
+
+    if _has_meaningful_resume_field(stopping_point):
+        safe_stopping_point = html.escape(stopping_point)
+        return (
+            "Продолжим прошлую тему.\n\n"
+            "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+            "В прошлый раз вы остановились вот здесь:\n"
+            f"<blockquote>{safe_stopping_point}</blockquote>\n\n"
+            "Напишите каждый коротко: <b>что вам хочется сказать именно отсюда?</b>\n"
+            "Отвечайте независимо — я жду ответа от вас обоих."
+        )
+
+    if _has_meaningful_resume_field(unresolved):
+        safe_unresolved = html.escape(unresolved)
+        return (
+            "Продолжим прошлую тему.\n\n"
+            "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
+            "Похоже, в прошлый раз здесь осталось что-то важное:\n"
+            f"<blockquote>{safe_unresolved}</blockquote>\n\n"
+            "Напишите каждый коротко: <b>что вам хочется договорить или прояснить сначала?</b>\n"
+            "Отвечайте независимо — я жду ответа от вас обоих."
+        )
+
     return (
         "Продолжим прошлую тему.\n\n"
         "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
-        "Напишите каждый коротко: <b>что в этой теме сейчас для вас самое живое или важное?</b>\n"
+        "Напишите каждый коротко: <b>с какого места вам лучше продолжить этот разговор?</b>\n"
         "Отвечайте независимо — я жду ответа от вас обоих."
     )
 
 
-def _resume_alignment_retry_intro() -> str:
+def _default_resume_alignment_resolution(session: SessionState) -> str:
+    stopping_point = _extract_resume_field(session.resume_context, "Где остановились")
+    unresolved = _extract_resume_field(session.resume_context, "Что осталось недосказанным")
+    if _has_meaningful_resume_field(stopping_point) or _has_meaningful_resume_field(unresolved):
+        return RESUME_CHOICE_CONTINUE
+    return RESUME_CHOICE_NEW_TOPIC
+
+
+def _resume_alignment_retry_intro(
+    session: SessionState,
+    *,
+    reply_a: str,
+    reply_b: str,
+) -> str:
     return (
-        "Пока я не вижу общего решения.\n\n"
-        "Напишите ещё раз коротко и прямо: <b>продолжить прошлую тему</b> "
-        "или <b>начать новую</b>."
+        "Пока у вас не сложилось общее решение по старту.\n\n"
+        "Сейчас я понял это так:\n\n"
+        f"{format_participant_dialog_block(session.name_a, html.escape(reply_a.strip()))}\n\n"
+        f"{format_participant_dialog_block(session.name_b, html.escape(reply_b.strip()))}\n\n"
+        "Напишите каждый ещё раз коротко и прямо одним из вариантов: "
+        "<b>продолжить прошлую тему</b>, <b>начать новую</b> или "
+        "<b>мне ок любой вариант</b>."
     )
 
 
@@ -404,14 +853,14 @@ def _regular_setup_intro() -> str:
         "• Говорит один, второй слушает — я слежу за очерёдностью\n"
         "• Если захотите закончить сессию, просто напишите об этом в чат\n\n"
         "<b>👥 Первый вопрос — к каждому из вас.</b>\n\n"
-        "Напишите каждый своё: <b>что ты хочешь получить от этого разговора?</b>\n"
+        "Напишите каждый своё: <b>с какой темы вам важно начать сегодня или что вам важнее всего обсудить?</b>\n"
         "Отвечайте независимо — я жду ответа от вас обоих."
     )
 
 
 def _apply_resume_resolution(session: SessionState, resolution: str) -> str:
     if resolution == RESUME_CHOICE_CONTINUE:
-        return _resume_continue_intro()
+        return _resume_continue_intro(session)
     session.resume_context = ""
     return _regular_setup_intro()
 
@@ -425,13 +874,14 @@ async def _handle_resume_alignment_text(
     redis,
     repo: SessionRepository,
 ) -> None:
-    status, resolution = await process_alignment_reply(
+    status, resolution, _, _ = await process_alignment_reply(
         redis,
         session_id=session.session_id,
         user_id=user_id,
         user_a_id=session.user_a_id,
         user_b_id=session.user_b_id,
         text=text,
+        default_resolution=_default_resume_alignment_resolution(session),
     )
     if status == "waiting":
         await bot.send_message(
@@ -452,8 +902,21 @@ async def _handle_resume_alignment_text(
         await svc.notify_both(session, followup)
         return
 
+    reply_a, reply_b = await get_alignment_replies(
+        redis,
+        session_id=session.session_id,
+        user_a_id=session.user_a_id,
+        user_b_id=session.user_b_id,
+    )
     log.info("resume_choice_alignment_retry", session_id=session.session_id)
-    await svc.notify_both(session, _resume_alignment_retry_intro())
+    await svc.notify_both(
+        session,
+        _resume_alignment_retry_intro(
+            session,
+            reply_a=reply_a or "",
+            reply_b=reply_b or "",
+        ),
+    )
 
 
 async def _notify_admins_about_risk(bot: Bot, session: SessionState) -> None:
@@ -516,7 +979,10 @@ async def handle_session_message(
 
     # Триггер завершения сессии — от любого участника и вне очереди
     if message.text and _looks_like_end_session_intent(message.text):
-        await _request_end_session_confirmation(session=session, repo=repo, bot=bot)
+        if session.close_choice_active:
+            await message.answer("Кнопка завершения уже открыта. Если готовы, нажмите её.")
+            return
+        await _present_direct_end_session_button(session=session, repo=repo, bot=bot)
         return
     if message.text and len(message.text) > MAX_MESSAGE_LENGTH:
         await message.answer(
@@ -638,11 +1104,6 @@ async def handle_voice_message(
             await message.answer("Сначала выберите на кнопке: продолжить прошлую тему или начать новую.")
             return
 
-    if resume_resolution != RESUME_CHOICE_ALIGNMENT_PENDING and not session.is_active_speaker(user_id):
-        bound_log.info("voice_rejected_not_active_speaker", waiting_for=session.waiting_for)
-        await message.answer("Я вижу, тебе есть что сказать. Дождёмся ответа партнёра — скоро будет твоя очередь.")
-        return
-
     throttle_ok = await _acquire_message_throttle(redis, user_id)
     if not throttle_ok:
         bound_log.info("message_throttled", input_type="voice")
@@ -690,6 +1151,13 @@ async def handle_voice_message(
         safe_text = html.escape(text)
         await message.answer(f"🎤 <i>{safe_text}</i>")
 
+        if _looks_like_end_session_intent(text):
+            if session.close_choice_active:
+                await message.answer("Кнопка завершения уже открыта. Если готовы, нажмите её.")
+                return
+            await _present_direct_end_session_button(session=session, repo=repo, bot=bot)
+            return
+
         if resume_resolution == RESUME_CHOICE_ALIGNMENT_PENDING:
             await _handle_resume_alignment_text(
                 session=session,
@@ -699,6 +1167,11 @@ async def handle_voice_message(
                 redis=redis,
                 repo=repo,
             )
+            return
+
+        if not session.is_active_speaker(user_id):
+            bound_log.info("voice_rejected_not_active_speaker", waiting_for=session.waiting_for)
+            await message.answer("Я вижу, тебе есть что сказать. Дождёмся ответа партнёра — скоро будет твоя очередь.")
             return
 
         if session.waiting_for == "BOTH":
@@ -774,14 +1247,12 @@ async def _collect_for_both(
 
     # Оба ответили — собираем объединённое сообщение для Claude
     both_answers = (
-        f"<b>{html.escape(session.name_a)}:</b>\n"
-        f"{html.escape(session.pending_a_message)}\n\n"
-        f"<b>{html.escape(session.name_b)}:</b>\n"
-        f"{html.escape(session.pending_b_message)}"
+        f"{format_participant_dialog_block(session.name_a, html.escape(session.pending_a_message))}\n\n"
+        f"{format_participant_dialog_block(session.name_b, html.escape(session.pending_b_message))}"
     )
     combined = (
-        f"[{session.name_a}]: {session.pending_a_message}\n"
-        f"[{session.name_b}]: {session.pending_b_message}"
+        f"[A]: {session.pending_a_message}\n"
+        f"[B]: {session.pending_b_message}"
     )
     for uid in (session.user_a_id, session.user_b_id):
         if uid:
@@ -798,6 +1269,45 @@ async def _collect_for_both(
     session.pending_a_message = ""
     session.pending_b_message = ""
     await repo.save(session)
+
+    if session.dialogue_state == "SETUP" and not session.last_turn_summary:
+        setup_seed = _detect_setup_topic_seed(text_a, text_b)
+        if setup_seed is not None:
+            proposer_label, topic_text, other_kind = setup_seed
+            proposer_name = session.name_a if proposer_label == "A" else session.name_b
+            log.info(
+                "setup_topic_seed_prompt_triggered",
+                session_id=session.session_id,
+                proposer=proposer_label,
+                other_kind=other_kind,
+            )
+            _apply_next_speaker(session, "BOTH")
+            session.last_turn_summary = (
+                f"{SETUP_TOPIC_SEED_SUMMARY_PREFIX}"
+                f"{proposer_name}: {topic_text[:120].strip()}"
+            )
+            prompt = _setup_topic_seed_prompt(
+                session,
+                proposer_label=proposer_label,
+                topic_text=topic_text,
+                other_kind=other_kind,
+            )
+            await repo.append_event(
+                session_id=session.session_id,
+                role="assistant",
+                speaker_label="BOT",
+                content=prompt,
+                dialogue_state_before=session.dialogue_state,
+                dialogue_state_after=session.dialogue_state,
+                waiting_for_before="BOTH",
+                waiting_for_after=session.waiting_for,
+                next_speaker="BOTH",
+                addressed_to="BOTH",
+                risk_flag=False,
+            )
+            await repo.save(session)
+            await _svc(bot, repo).notify_both(session, prompt)
+            return
 
     if (
         session.dialogue_state == "SETUP"
@@ -842,7 +1352,7 @@ async def _collect_for_both(
         reply, risk_detected, next_speaker, response_meta = await _claude.get_facilitator_response(
             session,
             combined,
-            f"{session.name_a} и {session.name_b}",
+            "BOTH",
             repo,
             address_feedback=address_feedback,
             feedback_target=None,
@@ -871,11 +1381,8 @@ async def _collect_for_both(
         await svc.notify_both(session, html.escape(reply))
         await svc.notify_both(
             session,
-            "Сессия остановлена. Если кому-то сейчас небезопасно:\n"
-            "🇷🇺 8-800-2000-122 (бесплатно)\n"
-            "🇺🇦 0 800 500 335 (бесплатно)\n"
-            "🇰🇿 150 (психологическая помощь)\n"
-            "Экстренные службы: 112",
+            "Сессия остановлена. Если кому-то сейчас небезопасно, "
+            "пожалуйста, обратитесь за немедленной очной помощью.",
             reply_markup=post_session_keyboard(),
         )
         await _claude.clear_history(session.session_id, repo)
@@ -893,11 +1400,8 @@ async def _collect_for_both(
             session_id=session.session_id,
             reason=alignment_reason,
             next_speaker_was=next_speaker,
-            next_speaker_now=aligned_next_speaker,
+            detected_addressee=aligned_next_speaker,
         )
-        next_speaker = aligned_next_speaker
-        response_meta["addressed_to"] = aligned_next_speaker
-        response_meta["next_speaker"] = aligned_next_speaker
     _apply_next_speaker(session, next_speaker)
     signature, keyboard = _reply_extras(session)
     full_reply = reply + signature
@@ -919,7 +1423,7 @@ async def _collect_for_both(
     for uid in (session.user_a_id, session.user_b_id):
         if uid:
             try:
-                await bot.send_message(uid, full_reply, reply_markup=keyboard)
+                await bot.send_message(uid, format_bot_dialog_message(full_reply), reply_markup=keyboard)
             except Exception:
                 log.warning(
                     "both_bot_reply_delivery_failed",
@@ -956,7 +1460,10 @@ async def _process_turn(
     # Передать сообщение партнёру
     if partner_id and partner_id != message.from_user.id:
         try:
-            await bot.send_message(partner_id, f"<b>{html.escape(sender_name)}:</b> {relay_text}")
+            await bot.send_message(
+                partner_id,
+                f"<b>{format_participant_dialog_label(sender_name)}:</b> {relay_text}",
+            )
         except Exception:
             log.exception(
                 "partner_message_relay_failed",
@@ -1013,11 +1520,8 @@ async def _process_turn(
         await svc.notify_both(session, html.escape(reply))
         await svc.notify_both(
             session,
-            "Сессия остановлена. Если кому-то сейчас небезопасно:\n"
-            "🇷🇺 8-800-2000-122 (бесплатно)\n"
-            "🇺🇦 0 800 500 335 (бесплатно)\n"
-            "🇰🇿 150 (психологическая помощь)\n"
-            "Экстренные службы: 112",
+            "Сессия остановлена. Если кому-то сейчас небезопасно, "
+            "пожалуйста, обратитесь за немедленной очной помощью.",
             reply_markup=post_session_keyboard(),
         )
         await _claude.clear_history(session.session_id, repo)
@@ -1035,11 +1539,8 @@ async def _process_turn(
             session_id=session.session_id,
             reason=alignment_reason,
             next_speaker_was=next_speaker,
-            next_speaker_now=aligned_next_speaker,
+            detected_addressee=aligned_next_speaker,
         )
-        next_speaker = aligned_next_speaker
-        response_meta["addressed_to"] = aligned_next_speaker
-        response_meta["next_speaker"] = aligned_next_speaker
     _apply_next_speaker(session, next_speaker)
     signature, keyboard = _reply_extras(session)
     full_reply = reply + signature
@@ -1061,7 +1562,7 @@ async def _process_turn(
     for uid in (message.from_user.id, partner_id):
         if uid and uid not in (0, None):
             try:
-                await bot.send_message(uid, full_reply, reply_markup=keyboard)
+                await bot.send_message(uid, format_bot_dialog_message(full_reply), reply_markup=keyboard)
             except Exception:
                 log.warning(
                     "single_bot_reply_delivery_failed",

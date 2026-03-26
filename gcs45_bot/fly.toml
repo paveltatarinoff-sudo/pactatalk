@@ -4,6 +4,9 @@ primary_region = "fra"  # Frankfurt — близко к Neon eu-central и Upsta
 [build]
   dockerfile = "Dockerfile"
 
+[deploy]
+  release_command = "python -m alembic upgrade head"
+
 [http_service]
   internal_port = 8080
   force_https = true

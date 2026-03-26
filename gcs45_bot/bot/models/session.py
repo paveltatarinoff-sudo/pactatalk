@@ -26,6 +26,10 @@ class SessionState:
     dialogue_state: str = "SETUP"
     last_turn_summary: str = ""  # краткое резюме последнего хода для async context
     close_confirmation_pending: bool = False
+    close_choice_active: bool = False
+    close_continue_votes: str = ""
+    close_choice_msg_id_a: int = 0
+    close_choice_msg_id_b: int = 0
 
     # Режим и фаза
     mode: Literal["structured", "free", "pause", "closing"] = "structured"

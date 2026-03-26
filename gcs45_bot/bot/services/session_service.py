@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import random
 import string
 from datetime import datetime
@@ -12,6 +13,24 @@ from bot.models.session import SessionState
 from bot.repositories.session_repo import SessionRepository
 
 log = structlog.get_logger()
+BOT_DIALOG_LABEL = "🤖 Pacta"
+PARTICIPANT_DIALOG_ICON = "👤"
+
+
+def format_bot_dialog_message(text: str) -> str:
+    stripped = text.lstrip()
+    prefix = f"<b>{BOT_DIALOG_LABEL}</b>"
+    if stripped.startswith(prefix):
+        return text
+    return f"{prefix}\n\n{text}"
+
+
+def format_participant_dialog_label(name: str) -> str:
+    return f"{PARTICIPANT_DIALOG_ICON} {html.escape(name)}"
+
+
+def format_participant_dialog_block(name: str, text: str) -> str:
+    return f"<b>{format_participant_dialog_label(name)}:</b>\n{text}"
 
 
 def generate_invite_code(length: int = 6) -> str:
@@ -88,10 +107,11 @@ class SessionService:
 
     async def notify_both(self, session: SessionState, text: str, **kwargs) -> None:
         """Отправить сообщение обоим партнёрам."""
+        payload = format_bot_dialog_message(text)
         for uid in (session.user_a_id, session.user_b_id):
             if uid:
                 try:
-                    await self._bot.send_message(uid, text, **kwargs)
+                    await self._bot.send_message(uid, payload, **kwargs)
                 except Exception:
                     log.warning(
                         "notify_both_delivery_failed",
