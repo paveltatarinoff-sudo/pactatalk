@@ -1764,17 +1764,6 @@ class ClaudeService:
         # Track whether server overrode handoff (prevents facilitator guardrail from reverting)
         server_handoff_override = False
 
-        if address_feedback and feedback_target in ("A", "B") and next_speaker != feedback_target:
-            log.info(
-                "post_guard_feedback_handoff_override",
-                session_id=session.session_id,
-                feedback_target=feedback_target,
-                next_speaker_was=next_speaker,
-            )
-            next_speaker = feedback_target
-            addressed_to = feedback_target
-            server_handoff_override = True
-
         # Post-response guard: force BOTH in OPTIONS/AGREE/CHECK_IN (these are joint steps)
         if next_speaker in ("A", "B") and effective_state in ("OPTIONS", "AGREE", "CHECK_IN"):
             log.info(

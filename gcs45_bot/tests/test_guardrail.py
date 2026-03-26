@@ -105,7 +105,7 @@ def test_handoff_coherence_allows_override_without_name_conflict() -> None:
     assert reason is None
 
 
-def test_feedback_override_restores_target_speaker_in_service() -> None:
+def test_feedback_signal_does_not_override_service_handoff() -> None:
     session = _session()
     repo = _HistoryRepo()
     service = ClaudeService()
@@ -137,8 +137,8 @@ def test_feedback_override_restores_target_speaker_in_service() -> None:
 
     assert risk_flag is False
     assert message.startswith("Коротко признаю")
-    assert next_speaker == "A"
-    assert response_meta["addressed_to"] == "A"
+    assert next_speaker == "B"
+    assert response_meta["addressed_to"] == "B"
 
 
 def test_process_turn_passes_feedback_flag_to_service(monkeypatch) -> None:
