@@ -1642,6 +1642,89 @@ class ClaudeService:
         )
         return session.dialogue_state
 
+    def resolve_handoff_invariants(
+        self,
+        addressed_to: str,
+        effective_state: str,
+        messages: list[dict],
+        session: SessionState,
+    ) -> str:
+        """Единственная точка server-side коррекции handoff."""
+        resolved = addressed_to
+
+        if resolved not in ("A", "B", "BOTH"):
+            log.warning(
+                "gpt_invalid_addressed_to_fallback",
+                session_id=session.session_id,
+                addressed_to=resolved,
+                fallback="BOTH",
+            )
+            resolved = "BOTH"
+
+        if resolved in ("A", "B") and effective_state in ("OPTIONS", "AGREE", "CHECK_IN"):
+            log.info(
+                "post_guard_forced_both_in_joint_state",
+                session_id=session.session_id,
+                effective_state=effective_state,
+                was_speaker=resolved,
+            )
+            resolved = "BOTH"
+
+        if resolved == "BOTH" and effective_state in ("DEEPEN", "DEESCALATE", "CLARIFY"):
+            forced_speaker = self._last_user_speaker(messages)
+            if forced_speaker not in ("A", "B"):
+                forced_speaker = "A"
+            log.info(
+                "post_guard_blocked_both_in_deepen",
+                session_id=session.session_id,
+                effective_state=effective_state,
+                forced_speaker=forced_speaker,
+            )
+            resolved = forced_speaker
+
+        if (
+            resolved == "BOTH"
+            and effective_state not in ("OPTIONS", "AGREE", "CHECK_IN")
+            and self._recent_consecutive_joint_turns(messages) >= self.MAX_CONSECUTIVE_BOTH_TURNS
+        ):
+            forced_speaker = self._preferred_focus_speaker_after_joint(session, messages)
+            log.info(
+                "post_guard_forced_exit_both_limit",
+                session_id=session.session_id,
+                effective_state=effective_state,
+                forced_speaker=forced_speaker,
+            )
+            resolved = forced_speaker
+
+        if (
+            resolved == "BOTH"
+            and effective_state not in ("OPTIONS", "AGREE", "CHECK_IN", "SETUP")
+            and self._last_user_message_is_vulnerable(messages)
+        ):
+            forced_speaker = self._last_user_speaker(messages)
+            if forced_speaker not in ("A", "B"):
+                forced_speaker = "A"
+            log.info(
+                "post_guard_blocked_both_after_vulnerability",
+                session_id=session.session_id,
+                forced_speaker=forced_speaker,
+            )
+            resolved = forced_speaker
+
+        consec_count, consec_speaker = self._consecutive_same_speaker(messages)
+        if consec_count >= 3 and consec_speaker in ("A", "B") and resolved == consec_speaker:
+            forced_speaker = "B" if consec_speaker == "A" else "A"
+            log.info(
+                "post_guard_forced_switch_consecutive",
+                session_id=session.session_id,
+                consecutive_turns=consec_count,
+                was_speaker=consec_speaker,
+                forced_speaker=forced_speaker,
+            )
+            resolved = forced_speaker
+
+        return resolved
+
     async def _get_history(self, session_id: str, repo) -> list[dict]:
         return await repo.get_history(session_id)
 
@@ -1711,16 +1794,15 @@ class ClaudeService:
             raise OpenAIServiceError("AI вернул некорректный ответ. Попробуйте ещё раз.") from exc
 
         message: str = data.get("message", "").strip()
-        next_speaker: str = data.get("next_speaker", session.waiting_for)
+        model_next_speaker: str = data.get("next_speaker", session.waiting_for)
         risk_flag: bool = bool(data.get("risk_flag", False))
-        addressed_to: str = data.get("addressed_to", next_speaker)
+        addressed_to: str = data.get("addressed_to", model_next_speaker)
         next_state: str = data.get("next_state", session.dialogue_state)
-        original_gpt_addressed_to = addressed_to if addressed_to in ("A", "B", "BOTH") else "BOTH"
 
         log.info(
             "gpt_response",
             session_id=session.session_id,
-            next_speaker=next_speaker,
+            next_speaker=model_next_speaker,
             addressed_to=addressed_to,
             next_state=next_state,
             dialogue_state_was=session.dialogue_state,
@@ -1728,182 +1810,25 @@ class ClaudeService:
             msg_prefix=message[:60],
         )
 
-        # Сервер определяет адресата только по addressed_to.
-        if addressed_to in ("A", "B", "BOTH"):
-            next_speaker = addressed_to
-        else:
-            log.warning(
-                "gpt_invalid_addressed_to_fallback",
-                session_id=session.session_id,
-                addressed_to=addressed_to,
-                fallback="BOTH",
-            )
-            next_speaker = "BOTH"
-
         name_a = session.name_a or "A"
         name_b = session.name_b or "B"
-        if next_speaker == "A" and self._starts_with_partner_name(message, name_b):
-            log.warning(
-                "gpt_message_address_conflict_fallback",
+        if addressed_to == "A" and self._starts_with_partner_name(message, name_b):
+            log.info(
+                "gpt_message_address_conflict_observed",
                 session_id=session.session_id,
-                next_speaker_was=next_speaker,
+                addressed_to=addressed_to,
                 conflicting_name=name_b,
-                fallback="BOTH",
             )
-            next_speaker = "BOTH"
-        elif next_speaker == "B" and self._starts_with_partner_name(message, name_a):
-            log.warning(
-                "gpt_message_address_conflict_fallback",
+        elif addressed_to == "B" and self._starts_with_partner_name(message, name_a):
+            log.info(
+                "gpt_message_address_conflict_observed",
                 session_id=session.session_id,
-                next_speaker_was=next_speaker,
+                addressed_to=addressed_to,
                 conflicting_name=name_a,
-                fallback="BOTH",
             )
-            next_speaker = "BOTH"
 
-        # Track whether server overrode handoff (prevents facilitator guardrail from reverting)
-        server_handoff_override = False
-
-        # Post-response guard: force BOTH in OPTIONS/AGREE/CHECK_IN (these are joint steps)
-        if next_speaker in ("A", "B") and effective_state in ("OPTIONS", "AGREE", "CHECK_IN"):
-            log.info(
-                "post_guard_forced_both_in_joint_state",
-                session_id=session.session_id,
-                effective_state=effective_state,
-                was_speaker=next_speaker,
-            )
-            next_speaker = "BOTH"
-            addressed_to = "BOTH"
-            server_handoff_override = True
-
-        # Post-response guard: fix mixed address for BOTH
-        # If next_speaker=BOTH but message starts with one partner's name, strip the name
-        if next_speaker == "BOTH":
-            for check_name, check_label in ((name_a, "A"), (name_b, "B")):
-                if self._starts_with_partner_name(message, check_name):
-                    # Remove the name prefix to avoid mixed address
-                    stripped = message.lstrip()
-                    lower_name = check_name.strip().lower()
-                    lower_msg = stripped.lower()
-                    if lower_msg.startswith(f"{lower_name},"):
-                        message = stripped[len(check_name) + 1:].lstrip()
-                    elif lower_msg.startswith(f"{lower_name}:"):
-                        message = stripped[len(check_name) + 1:].lstrip()
-                    log.info(
-                        "post_guard_stripped_name_from_both",
-                        session_id=session.session_id,
-                        stripped_name=check_name,
-                    )
-                    server_handoff_override = True
-                    break
-
-        # Post-response guard: block BOTH in DEEPEN/DEESCALATE/CLARIFY
-        # (BOTH is allowed in OPTIONS/AGREE/CHECK_IN/SETUP)
-        if next_speaker == "BOTH" and effective_state in ("DEEPEN", "DEESCALATE", "CLARIFY"):
-            last_speaker = self._last_user_speaker(messages)
-            if last_speaker in ("A", "B"):
-                log.info(
-                    "post_guard_blocked_both_in_deepen",
-                    session_id=session.session_id,
-                    effective_state=effective_state,
-                    forced_speaker=last_speaker,
-                )
-                next_speaker = last_speaker
-                addressed_to = last_speaker
-                server_handoff_override = True
-
-        # Post-response guard: exit sticky BOTH after repeated joint setup cycles
-        if (
-            next_speaker == "BOTH"
-            and effective_state not in ("OPTIONS", "AGREE", "CHECK_IN")
-            and self._recent_consecutive_joint_turns(messages) >= self.MAX_CONSECUTIVE_BOTH_TURNS
-        ):
-            forced_speaker = self._preferred_focus_speaker_after_joint(session, messages)
-            log.info(
-                "post_guard_forced_exit_both_limit",
-                session_id=session.session_id,
-                effective_state=effective_state,
-                forced_speaker=forced_speaker,
-            )
-            next_speaker = forced_speaker
-            addressed_to = forced_speaker
-            server_handoff_override = True
-
-        # Post-response guard: block BOTH after vulnerability (not in OPTIONS/AGREE/CHECK_IN)
-        if (next_speaker == "BOTH"
-                and effective_state not in ("OPTIONS", "AGREE", "CHECK_IN", "SETUP")
-                and self._last_user_message_is_vulnerable(messages)):
-            last_speaker = self._last_user_speaker(messages)
-            if last_speaker in ("A", "B"):
-                log.info(
-                    "post_guard_blocked_both_after_vulnerability",
-                    session_id=session.session_id,
-                    forced_speaker=last_speaker,
-                )
-                next_speaker = last_speaker
-                addressed_to = last_speaker
-                server_handoff_override = True
-
-        # Post-response guard: natural switch after short/clear answer
-        # If last answer was short (<=8 words), not vulnerable, same speaker 2+ consecutive,
-        # and GPT still returns the same speaker — force switch
-        if not server_handoff_override and effective_state not in ("OPTIONS", "AGREE", "CHECK_IN", "SETUP"):
-            last_turns_for_switch = self._recent_user_turns(messages, limit=1)
-            if last_turns_for_switch:
-                sw_speaker_label, sw_text = last_turns_for_switch[0]
-                sw_word_count = len(sw_text.split())
-                sw_consec, sw_consec_speaker = self._consecutive_same_speaker(messages)
-                if (sw_word_count <= 8
-                        and sw_consec >= 2
-                        and sw_consec_speaker in ("A", "B")
-                        and next_speaker == sw_consec_speaker
-                        and self._should_natural_switch_short_answer(messages, effective_state)
-                        and not self._last_user_message_is_vulnerable(messages)):
-                    other = "B" if sw_consec_speaker == "A" else "A"
-                    log.info(
-                        "post_guard_natural_switch_short_answer",
-                        session_id=session.session_id,
-                        word_count=sw_word_count,
-                        consecutive=sw_consec,
-                        was_speaker=sw_consec_speaker,
-                        forced_speaker=other,
-                    )
-                    next_speaker = other
-                    addressed_to = other
-                    server_handoff_override = True
-
-        # Post-response guard: force switch after 3+ consecutive turns to same speaker
-        consec_count, consec_speaker = self._consecutive_same_speaker(messages)
-        if consec_count >= 3 and consec_speaker in ("A", "B") and next_speaker == consec_speaker:
-            other = "B" if consec_speaker == "A" else "A"
-            log.info(
-                "post_guard_forced_switch_consecutive",
-                session_id=session.session_id,
-                consecutive_turns=consec_count,
-                was_speaker=consec_speaker,
-                forced_speaker=other,
-            )
-            next_speaker = other
-            addressed_to = other
-            server_handoff_override = True
-
-        coherent_next_speaker, coherence_reason = self._apply_handoff_coherence_check(
-            session=session,
-            message=message,
-            original_addressed_to=original_gpt_addressed_to,
-            final_next_speaker=next_speaker,
-        )
-        if coherence_reason is not None:
-            log.info(
-                "post_guard_handoff_coherence_blocked_override",
-                session_id=session.session_id,
-                reason=coherence_reason,
-                original_addressed_to=original_gpt_addressed_to,
-                final_next_speaker=next_speaker,
-            )
-            next_speaker = coherent_next_speaker
-            addressed_to = coherent_next_speaker
-            server_handoff_override = True
+        addressed_to = self.resolve_handoff_invariants(addressed_to, effective_state, messages, session)
+        next_speaker = addressed_to
 
         # Обновляем state machine и async context (caller сохранит сессию)
         valid_states = {"SETUP", "CLARIFY", "DEESCALATE", "DEEPEN", "OPTIONS", "AGREE", "CHECK_IN"}
@@ -1978,7 +1903,6 @@ class ClaudeService:
             "dialogue_state_after": session.dialogue_state,
             "waiting_for_before": waiting_for_before,
             "risk_flag": risk_flag,
-            "server_handoff_override": server_handoff_override,
         }
 
         return message, risk_flag, next_speaker, response_meta
