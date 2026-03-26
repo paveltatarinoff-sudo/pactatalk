@@ -1300,8 +1300,8 @@ class ClaudeService:
             addressed_to = feedback_target
             server_handoff_override = True
 
-        # Post-response guard: force BOTH in OPTIONS/AGREE (these are joint steps)
-        if next_speaker in ("A", "B") and effective_state in ("OPTIONS", "AGREE"):
+        # Post-response guard: force BOTH in OPTIONS/AGREE/CHECK_IN (these are joint steps)
+        if next_speaker in ("A", "B") and effective_state in ("OPTIONS", "AGREE", "CHECK_IN"):
             log.info(
                 "post_guard_forced_both_in_joint_state",
                 session_id=session.session_id,
