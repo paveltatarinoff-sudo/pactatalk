@@ -288,6 +288,66 @@ def test_voice_continue_later_intent_shows_direct_finish_button(monkeypatch) -> 
     asyncio.run(scenario())
 
 
+def test_text_handler_returns_retry_prompt_when_collect_for_both_crashes(monkeypatch) -> None:
+    async def scenario() -> None:
+        session = _session(waiting_for="BOTH")
+        repo = _RepoStub(session)
+        bot = _BotStub()
+        message = _MessageStub(user_id=1, text="обычный ответ")
+        redis = _RedisStub()
+
+        async def fake_collect_for_both(**kwargs) -> None:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(facilitator, "SessionRepository", lambda redis, session_factory: repo)
+        monkeypatch.setattr(facilitator, "_collect_for_both", fake_collect_for_both)
+
+        await facilitator.handle_session_message(
+            message=message,
+            bot=bot,
+            redis=redis,
+            session_factory=None,
+            state=None,
+        )
+
+        assert message.answers
+        assert message.answers[-1][0] == "Что-то пошло не так. Пожалуйста, отправь сообщение ещё раз."
+
+    asyncio.run(scenario())
+
+
+def test_voice_handler_returns_retry_prompt_when_process_turn_crashes(monkeypatch) -> None:
+    async def scenario() -> None:
+        session = _session(waiting_for="A")
+        repo = _RepoStub(session)
+        bot = _BotStub()
+        message = _VoiceMessageStub(user_id=1)
+        redis = _RedisStub()
+
+        async def fake_transcribe_voice(_: bytes) -> str:
+            return "Нормальный ответ голосом."
+
+        async def fake_process_turn(**kwargs) -> None:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(facilitator, "SessionRepository", lambda redis, session_factory: repo)
+        monkeypatch.setattr(facilitator._claude, "transcribe_voice", fake_transcribe_voice)
+        monkeypatch.setattr(facilitator, "_process_turn", fake_process_turn)
+
+        await facilitator.handle_voice_message(
+            message=message,
+            bot=bot,
+            redis=redis,
+            session_factory=None,
+            state=None,
+        )
+
+        assert message.answers[0][0] == "🎤 <i>Нормальный ответ голосом.</i>"
+        assert message.answers[-1][0] == "Что-то пошло не так. Пожалуйста, отправь сообщение ещё раз."
+
+    asyncio.run(scenario())
+
+
 def test_reply_extras_no_longer_adds_finish_button_in_regular_flow() -> None:
     session = _session()
 

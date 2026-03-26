@@ -46,6 +46,11 @@ class _RepoStub:
         self.saved_sessions.append(session)
 
 
+class _FailingEventRepo(_RepoStub):
+    async def append_event(self, **kwargs) -> None:
+        raise RuntimeError("transient postgres error")
+
+
 class _BotStub:
     def __init__(self) -> None:
         self.sent_messages: list[tuple[int, str]] = []
@@ -198,6 +203,71 @@ def test_process_turn_uses_service_handoff_as_pass_through(monkeypatch) -> None:
 
     assert session.waiting_for == "B"
     assert repo.events[-1]["next_speaker"] == "B"
+
+
+def test_collect_for_both_keeps_pending_when_append_event_fails() -> None:
+    session = _session(waiting_for="BOTH", state="SETUP")
+    repo = _FailingEventRepo()
+    bot = _BotStub()
+    message = _MessageStub(user_id=1)
+
+    asyncio.run(
+        facilitator._collect_for_both(
+            text="Хочу обсудить переезд.",
+            relay_text="Хочу обсудить переезд.",
+            message=message,
+            session=session,
+            sender_label="A",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+
+    assert message.answers == ["Принято. Жду ответа от второго партнёра."]
+    assert session.pending_a_message == "Хочу обсудить переезд."
+    assert repo.saved_sessions
+
+
+def test_process_turn_continues_when_append_event_fails(monkeypatch) -> None:
+    class _ClaudeStub:
+        async def get_facilitator_response(self, session, user_message, sender_label, repo, **kwargs):
+            return (
+                "Спасибо. Хочу услышать вторую сторону.",
+                False,
+                "B",
+                {
+                    "dialogue_state_before": session.dialogue_state,
+                    "waiting_for_before": session.waiting_for,
+                    "addressed_to": "B",
+                    "risk_flag": False,
+                },
+            )
+
+    monkeypatch.setattr(facilitator, "_claude", _ClaudeStub())
+    monkeypatch.setattr(facilitator, "_reply_extras", lambda session: ("", None))
+
+    session = _session(waiting_for="A")
+    repo = _FailingEventRepo()
+    bot = _BotStub()
+    message = _MessageStub(user_id=1)
+
+    asyncio.run(
+        facilitator._process_turn(
+            text="обычный ответ",
+            relay_text="обычный ответ",
+            message=message,
+            session=session,
+            sender_label="A",
+            bot=bot,
+            repo=repo,
+            state=None,
+        )
+    )
+
+    assert session.waiting_for == "B"
+    assert any("Спасибо. Хочу услышать вторую сторону." in text for _, text in bot.sent_messages)
+    assert repo.saved_sessions
 
 
 def test_add_message_truncates_history_content_to_max_length() -> None:

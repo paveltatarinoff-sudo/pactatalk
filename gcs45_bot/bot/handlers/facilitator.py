@@ -249,6 +249,13 @@ async def _acquire_message_throttle(redis, user_id: int) -> bool:
     )
 
 
+async def _append_event_safe(repo, session: SessionState, **kwargs) -> None:
+    try:
+        await repo.append_event(**kwargs)
+    except Exception:
+        log.exception("append_event_failed", session_id=session.session_id)
+
+
 def _apply_next_speaker(session: SessionState, next_speaker: str) -> None:
     """Обновляет waiting_for. GPT всегда возвращает next_speaker через Structured Outputs.
     Страховочный лимит consecutive_turns оставлен на случай зацикливания.
@@ -1039,29 +1046,36 @@ async def handle_session_message(
             session = fresh
             bound_log = bound_log.bind(waiting_for=session.waiting_for, dialogue_state=session.dialogue_state)
 
-        safe_relay = html.escape(message.text or "")
-        if session.waiting_for == "BOTH":
-            await _collect_for_both(
-                text=message.text or "",
-                relay_text=safe_relay,
-                message=message,
-                session=session,
-                sender_label=sender_label,
-                bot=bot,
-                repo=repo,
-                state=state,
-            )
-        else:
-            await _process_turn(
-                text=message.text or "",
-                relay_text=safe_relay,
-                message=message,
-                session=session,
-                sender_label=sender_label,
-                bot=bot,
-                repo=repo,
-                state=state,
-            )
+        try:
+            safe_relay = html.escape(message.text or "")
+            if session.waiting_for == "BOTH":
+                await _collect_for_both(
+                    text=message.text or "",
+                    relay_text=safe_relay,
+                    message=message,
+                    session=session,
+                    sender_label=sender_label,
+                    bot=bot,
+                    repo=repo,
+                    state=state,
+                )
+            else:
+                await _process_turn(
+                    text=message.text or "",
+                    relay_text=safe_relay,
+                    message=message,
+                    session=session,
+                    sender_label=sender_label,
+                    bot=bot,
+                    repo=repo,
+                    state=state,
+                )
+        except Exception:
+            bound_log.exception("session_message_processing_failed")
+            try:
+                await message.answer("Что-то пошло не так. Пожалуйста, отправь сообщение ещё раз.")
+            except Exception:
+                pass
 
 
 # ─── Голосовые сообщения ──────────────────────────────────────────────────────
@@ -1166,28 +1180,35 @@ async def handle_voice_message(
             await message.answer("Я вижу, тебе есть что сказать. Дождёмся ответа партнёра — скоро будет твоя очередь.")
             return
 
-        if session.waiting_for == "BOTH":
-            await _collect_for_both(
-                text=text,
-                relay_text=f"🎤 <i>{safe_text}</i>",
-                message=message,
-                session=session,
-                sender_label=sender_label,
-                bot=bot,
-                repo=repo,
-                state=state,
-            )
-        else:
-            await _process_turn(
-                text=text,
-                relay_text=f"🎤 <i>{safe_text}</i>",
-                message=message,
-                session=session,
-                sender_label=sender_label,
-                bot=bot,
-                repo=repo,
-                state=state,
-            )
+        try:
+            if session.waiting_for == "BOTH":
+                await _collect_for_both(
+                    text=text,
+                    relay_text=f"🎤 <i>{safe_text}</i>",
+                    message=message,
+                    session=session,
+                    sender_label=sender_label,
+                    bot=bot,
+                    repo=repo,
+                    state=state,
+                )
+            else:
+                await _process_turn(
+                    text=text,
+                    relay_text=f"🎤 <i>{safe_text}</i>",
+                    message=message,
+                    session=session,
+                    sender_label=sender_label,
+                    bot=bot,
+                    repo=repo,
+                    state=state,
+                )
+        except Exception:
+            bound_log.exception("voice_message_processing_failed")
+            try:
+                await message.answer("Что-то пошло не так. Пожалуйста, отправь сообщение ещё раз.")
+            except Exception:
+                pass
 
 
 # ─── Режим BOTH: сбор ответов от обоих партнёров ─────────────────────────────
@@ -1205,7 +1226,9 @@ async def _collect_for_both(
     """Собирает ответы обоих партнёров, затем отправляет Claude объединённый запрос."""
     partner_id = session.user_b_id if sender_label == "A" else session.user_a_id
     other_name = session.name_b if sender_label == "A" else session.name_a
-    await repo.append_event(
+    await _append_event_safe(
+        repo,
+        session,
         session_id=session.session_id,
         role="user",
         speaker_label=sender_label,
@@ -1284,7 +1307,9 @@ async def _collect_for_both(
                 topic_text=topic_text,
                 other_kind=other_kind,
             )
-            await repo.append_event(
+            await _append_event_safe(
+                repo,
+                session,
                 session_id=session.session_id,
                 role="assistant",
                 speaker_label="BOT",
@@ -1317,7 +1342,9 @@ async def _collect_for_both(
         _apply_next_speaker(session, "BOTH")
         session.last_turn_summary = SETUP_TOPIC_SPLIT_SUMMARY
         prompt = _setup_topic_split_prompt()
-        await repo.append_event(
+        await _append_event_safe(
+            repo,
+            session,
             session_id=session.session_id,
             role="assistant",
             speaker_label="BOT",
@@ -1396,7 +1423,9 @@ async def _collect_for_both(
     _apply_next_speaker(session, next_speaker)
     signature, keyboard = _reply_extras(session)
     full_reply = reply + signature
-    await repo.append_event(
+    await _append_event_safe(
+        repo,
+        session,
         session_id=session.session_id,
         role="assistant",
         speaker_label="BOT",
@@ -1437,7 +1466,9 @@ async def _process_turn(
 ) -> None:
     sender_name = session.name_a if sender_label == "A" else session.name_b
     partner_id = session.user_b_id if sender_label == "A" else session.user_a_id
-    await repo.append_event(
+    await _append_event_safe(
+        repo,
+        session,
         session_id=session.session_id,
         role="user",
         speaker_label=sender_label,
@@ -1534,7 +1565,9 @@ async def _process_turn(
     _apply_next_speaker(session, next_speaker)
     signature, keyboard = _reply_extras(session)
     full_reply = reply + signature
-    await repo.append_event(
+    await _append_event_safe(
+        repo,
+        session,
         session_id=session.session_id,
         role="assistant",
         speaker_label="BOT",
