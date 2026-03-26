@@ -1794,15 +1794,15 @@ class ClaudeService:
             raise OpenAIServiceError("AI вернул некорректный ответ. Попробуйте ещё раз.") from exc
 
         message: str = data.get("message", "").strip()
-        model_next_speaker: str = data.get("next_speaker", session.waiting_for)
+        model_next_speaker = data.get("next_speaker")
         risk_flag: bool = bool(data.get("risk_flag", False))
-        addressed_to: str = data.get("addressed_to", model_next_speaker)
+        addressed_to: str = data.get("addressed_to") or model_next_speaker or session.waiting_for
         next_state: str = data.get("next_state", session.dialogue_state)
 
         log.info(
             "gpt_response",
             session_id=session.session_id,
-            next_speaker=model_next_speaker,
+            model_next_speaker=model_next_speaker,
             addressed_to=addressed_to,
             next_state=next_state,
             dialogue_state_was=session.dialogue_state,
@@ -1828,6 +1828,7 @@ class ClaudeService:
             )
 
         addressed_to = self.resolve_handoff_invariants(addressed_to, effective_state, messages, session)
+        # Compatibility field for callers and event logs: handoff authority stays in addressed_to.
         next_speaker = addressed_to
 
         # Обновляем state machine и async context (caller сохранит сессию)
