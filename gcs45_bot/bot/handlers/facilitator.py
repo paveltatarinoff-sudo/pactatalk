@@ -416,14 +416,6 @@ def _detect_explicit_reply_addressee(session: SessionState, reply: str) -> str |
         return "BOTH"
     return None
 
-
-def _align_next_speaker_with_reply(session: SessionState, reply: str, next_speaker: str) -> tuple[str, str | None]:
-    explicit_addressee = _detect_explicit_reply_addressee(session, reply)
-    if explicit_addressee in ("A", "B", "BOTH") and explicit_addressee != next_speaker:
-        return explicit_addressee, "reply_address_conflict"
-    return next_speaker, None
-
-
 def _looks_like_address_feedback(message: str) -> bool:
     normalized = _normalize_text(message)
     return any(pattern in normalized for pattern in ADDRESS_FEEDBACK_PATTERNS)
@@ -1393,14 +1385,13 @@ async def _collect_for_both(
 
     dialogue_state_before = response_meta.get("dialogue_state_before")
     waiting_for_before = response_meta.get("waiting_for_before")
-    aligned_next_speaker, alignment_reason = _align_next_speaker_with_reply(session, reply, next_speaker)
-    if alignment_reason is not None:
+    explicit_addressee = _detect_explicit_reply_addressee(session, reply)
+    if explicit_addressee in ("A", "B", "BOTH") and explicit_addressee != next_speaker:
         log.info(
-            "facilitator_reply_routing_aligned",
+            "facilitator_reply_routing_observed_conflict",
             session_id=session.session_id,
-            reason=alignment_reason,
             next_speaker_was=next_speaker,
-            detected_addressee=aligned_next_speaker,
+            detected_addressee=explicit_addressee,
         )
     _apply_next_speaker(session, next_speaker)
     signature, keyboard = _reply_extras(session)
@@ -1532,14 +1523,13 @@ async def _process_turn(
 
     dialogue_state_before = response_meta.get("dialogue_state_before")
     waiting_for_before = response_meta.get("waiting_for_before")
-    aligned_next_speaker, alignment_reason = _align_next_speaker_with_reply(session, reply, next_speaker)
-    if alignment_reason is not None:
+    explicit_addressee = _detect_explicit_reply_addressee(session, reply)
+    if explicit_addressee in ("A", "B", "BOTH") and explicit_addressee != next_speaker:
         log.info(
-            "facilitator_reply_routing_aligned",
+            "facilitator_reply_routing_observed_conflict",
             session_id=session.session_id,
-            reason=alignment_reason,
             next_speaker_was=next_speaker,
-            detected_addressee=aligned_next_speaker,
+            detected_addressee=explicit_addressee,
         )
     _apply_next_speaker(session, next_speaker)
     signature, keyboard = _reply_extras(session)

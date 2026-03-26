@@ -37,15 +37,28 @@ State selection и prompt rules живут в `bot/services/claude_service.py`.
 
 ### 2. Addressing / handoff
 
-Сервер не доверяет модели вслепую в выборе адресата.
+Источник истины для handoff: `addressed_to`.
 
-Используются server-side guardrails:
-- correction по пользовательскому feedback о неверной адресации
-- correction по явному обращению в тексте ответа
-- post-response валидация `next_speaker`
+Актуальный path такой:
+- модель возвращает `message`, `addressed_to`, `next_speaker`, `next_state`
+- сервер приводит handoff к инвариантам только в `ClaudeService.resolve_handoff_invariants()`
+- после этого `next_speaker` считается derived field от `addressed_to`
+- `session.waiting_for` получает уже финальное значение после `resolve_handoff_invariants()`
+
+Что делает сервер на handoff-слое:
+- валидирует `addressed_to`
+- форсит `BOTH` в `OPTIONS/AGREE/CHECK_IN`
+- блокирует `BOTH` в `DEEPEN/DEESCALATE/CLARIFY`
+- ограничивает затяжной `BOTH`
+- удерживает фокус на уязвимом спикере
+- делает принудительный switch после 3+ ходов одного партнёра подряд
+
+Что больше не является authority-layer:
+- `facilitator` не переписывает handoff по тексту ответа, только может логировать observed mismatch
+- feedback о неверной адресации влияет только через prompt signal, без server-side override
 
 Текущая очередь хранится в `session.waiting_for`.
-Подпись `теперь твой ход` строится из `session.waiting_for`, поэтому любые handoff fixes надо проверять до `_apply_next_speaker(...)`.
+Подпись `теперь твой ход` строится из `session.waiting_for`, поэтому handoff надо проверять до `_apply_next_speaker(...)`.
 
 ### 3. Policy for BOTH
 

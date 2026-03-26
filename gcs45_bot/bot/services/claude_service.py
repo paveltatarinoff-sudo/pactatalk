@@ -1054,25 +1054,6 @@ class ClaudeService:
         )
 
     @classmethod
-    def _apply_handoff_coherence_check(
-        cls,
-        *,
-        session: SessionState,
-        message: str,
-        original_addressed_to: str,
-        final_next_speaker: str,
-    ) -> tuple[str, str | None]:
-        """Block server overrides that would make text and turn routing disagree."""
-        if original_addressed_to not in ("A", "B") or final_next_speaker == original_addressed_to:
-            return final_next_speaker, None
-
-        original_name = session.name_a if original_addressed_to == "A" else session.name_b
-        if original_name and cls._starts_with_partner_name(message, original_name):
-            return original_addressed_to, "text_starts_with_original_addressee"
-
-        return final_next_speaker, None
-
-    @classmethod
     def _consecutive_same_speaker(cls, messages: list[dict]) -> tuple[int, str]:
         """Count how many consecutive user turns come from the same speaker (most recent)."""
         count = 0
