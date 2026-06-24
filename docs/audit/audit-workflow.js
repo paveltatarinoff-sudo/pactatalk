@@ -260,7 +260,74 @@ For each: what it is, what happens, what trigger. Diagnosis only.]
 
 Start by reading \`${AUDIT_DIR}/00-shared-header.md\` for the pinned commit SHA, then begin.
 `
-const SYNTHESIZER_PROMPT = ''
+const SYNTHESIZER_PROMPT = `
+You are the synthesizer for the PactTalk audit dated ${AUDIT_DATE}.
+
+# Your single deliverable
+
+Write the file \`${AUDIT_DIR}/STATE_OF_PACTTALK.md\` with the structure below.
+Your final text reply is irrelevant — your output is that file.
+
+# Hard rules
+
+- **You may NOT introduce any fact that is not in one of the 10 specialist files** under \`${AUDIT_DIR}/\`. You collate, deduplicate, and flag contradictions. You do not analyze the codebase yourself.
+- Every claim cites at least one source: \`[#N]\` (the specialist file number). Multiple sources welcome: \`[#3, #7]\`.
+- If two specialists disagree on a fact, do NOT pick a side. Record the disagreement in the "Contradictions" section.
+- If a specialist's "Scope covered" section reports a coverage gap, surface it in the "Coverage gaps" section.
+
+# Inputs
+
+Read every file under \`${AUDIT_DIR}/\` matching \`0[1-9]-*.md\` and \`10-*.md\` (the 10 specialist reports) plus \`00-shared-header.md\` (for date/SHA).
+
+# Required file structure (exact heading names)
+
+\`\`\`
+# State of PactTalk — ${AUDIT_DATE}, commit <SHA from 00-shared-header.md>
+
+## TL;DR
+
+[≤10 lines. What the owner needs to know right now.]
+
+## What's solid
+
+[Things shippable / demonstrable today. Pointers to specific modules/files. Cite specialists.]
+
+## What's broken or fragile
+
+[What will bite on first attempt to run or show. Each item: trigger + evidence + specialist citation.]
+
+## What was tried and abandoned
+
+[Traces of experiments and dropped branches. Cite specialists.]
+
+## Cross-cutting risks
+
+[Risks that touch ≥2 dimensions. Cite all relevant specialists.]
+
+## Non-obvious decisions worth preserving
+
+[Strong decisions not obvious from code — case-material. Cite specialists.]
+
+## Coverage gaps
+
+[Where specialists hit walls. Cite which specialist reported the gap.]
+
+## Open questions for the owner
+
+[Grouped questions from all 10 specialists' "## 6." sections. Cite each.]
+
+## Contradictions between specialists
+
+[Where specialists disagreed on a fact. No "winner" picked.]
+
+## Per-dimension scorecard
+
+| # | Dimension | Maturity finding (raw) | Key evidence | Top risk | Top open question |
+|---|-----------|------------------------|--------------|----------|-------------------|
+| 1 | LLM/prompts | ... | ... | ... | ... |
+... (one row per dimension #1–#10)
+\`\`\`
+`
 
 // --- orchestration --- (filled in Task 5)
 phase('Discover')
