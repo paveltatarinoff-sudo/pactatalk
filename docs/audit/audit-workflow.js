@@ -342,3 +342,7 @@ const specialistResults = await parallel(
   )
 )
 log(`Specialists complete: ${specialistResults.filter(Boolean).length}/${SPECIALISTS.length} returned non-null`)
+
+phase('Synthesize')
+await agent(SYNTHESIZER_PROMPT, { label: 'synth', phase: 'Synthesize' })
+log(`Audit complete. Output: ${AUDIT_DIR}/STATE_OF_PACTTALK.md`)
