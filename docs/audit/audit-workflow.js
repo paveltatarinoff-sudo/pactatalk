@@ -73,7 +73,7 @@ const SPECIALISTS = [
     file: '05-posthog.md',
     name: 'PostHog analytics',
     lens: 'Events sent and from where, funnels / dashboards / cohorts configured, what is alive in the data.',
-    scopeRoots: ['gcs45_bot/bot/', 'gcs-landing-v2/app/', 'gcs-landing-v2/components/'],
+    scopeRoots: ['gcs45_bot/bot/', 'gcs-landing-v2/app/'],
     scopeHints: ['Grep posthog.capture(, posthog.identify(, posthog.alias(, $pageview, posthog.track( in bot Python and landing TypeScript.', 'Pre-captured PostHog UI snapshot in docs/audit/_data/posthog/ lists 3 Validation funnels and 2 dashboards. TODO-for-specialist-5.md tells you what deeper UI dive is required.', 'If Chrome MCP is connected, drive https://us.posthog.com/project/362123/* to capture event definitions and funnel step composition. Otherwise emit "Coverage gap: no live PostHog access" and work from pre-captured + code-side inventory only.'],
     preCapturedData: ['docs/audit/_data/posthog/insights-list.md', 'docs/audit/_data/posthog/dashboards-list.md', 'docs/audit/_data/posthog/TODO-for-specialist-5.md'],
     handsOffTo: [
