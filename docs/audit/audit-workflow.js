@@ -265,3 +265,13 @@ const SYNTHESIZER_PROMPT = ''
 // --- orchestration --- (filled in Task 5)
 phase('Discover')
 await agent(SHARED_HEADER_PROMPT, { label: 'header', phase: 'Discover' })
+phase('Specialists')
+const specialistResults = await parallel(
+  SPECIALISTS.map(s => () =>
+    agent(renderSpecialistPrompt(s), {
+      label: `#${s.n} ${s.name}`,
+      phase: 'Specialists',
+    })
+  )
+)
+log(`Specialists complete: ${specialistResults.filter(Boolean).length}/${SPECIALISTS.length} returned non-null`)

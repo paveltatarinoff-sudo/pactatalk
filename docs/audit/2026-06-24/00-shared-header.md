@@ -1,7 +1,7 @@
 # PactTalk audit — shared header
 
 - Audit date: 2026-06-24
-- Commit SHA: 42c102d9b9512239da505b1d18ad52e62b606204
+- Commit SHA: d46ea5f779abb10afae4148433f7853396eea92f
 - Working tree clean: no, 26 dirty paths
 - Branch: main
 
