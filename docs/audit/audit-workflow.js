@@ -177,7 +177,89 @@ Your one task: write the file \`${AUDIT_DIR}/00-shared-header.md\` with EXACTLY 
 
 Do NOT write anything else. Do NOT add commentary outside the file. Your final text reply is irrelevant — your output is the file.
 `
-const renderSpecialistPrompt = (s) => ''
+const renderSpecialistPrompt = (s) => `
+You are specialist #${s.n} on the PactTalk audit dated ${AUDIT_DATE}.
+Your dimension: **${s.name}**.
+
+# Your single deliverable
+
+Write the file \`${AUDIT_DIR}/${s.file}\` with EXACTLY the six-section schema below.
+Your final text reply is irrelevant — your output is that file. Nothing else.
+
+# Your lens
+
+${s.lens}
+
+# Where to look (scope roots)
+
+${s.scopeRoots.map(p => `- ${p}`).join('\n')}
+
+# Tips for your scope
+
+${s.scopeHints.map(h => `- ${h}`).join('\n')}
+
+# Pre-captured data you can read directly (already on disk, no extraction needed)
+
+${s.preCapturedData.length ? s.preCapturedData.map(p => `- ${p}`).join('\n') : '- (none — work from the scope roots above)'}
+
+# Linked-but-not-owned (do NOT write these sections; emit a one-line handoff note inline)
+
+${s.handsOffTo.map(h => `- ${h}`).join('\n')}
+
+Handoff format inside your file: a single line wherever the topic appears, e.g.
+\`→ prompt content of facilitator_system: see specialist #1\`.
+
+# Hard rules
+
+- **Inventory only.** No recommendations on how to fix. If a fix idea is screaming, one line under \`## 7. Out-of-scope notes\`, no elaboration.
+- **Every factual claim needs evidence.** Use \`file:line\` (e.g. \`bot/services/llm.py:42\`), commit SHA (\`git log\` to verify), PostHog event/dashboard URL, log excerpt. Without evidence → mark \`[unverified]\` or drop.
+- **No invention.** If something is not in your scope or you cannot reach it → write "not found in scope" or "out of scope" or "coverage gap: <reason>". Do not guess.
+- **Soft limit ~1500 words.** Compress \`## 2. Inventory\` first if pressed.
+- **Pin to the commit SHA from \`${AUDIT_DIR}/00-shared-header.md\`.** Read it first.
+
+# Required file structure (exact heading names, in this order)
+
+\`\`\`
+# ${s.name}
+
+## 1. Scope covered
+
+[What you actually examined: paths, files, services, dashboards, events.
+Anything you didn't or couldn't examine: state it. Without this, the
+synthesizer cannot tell whether the dimension is covered.]
+
+## 2. Inventory
+
+[Map of what exists. Bullet list of entities with a short role each.
+Factual, not evaluative.]
+
+## 3. State of each piece
+
+| Item | State | Evidence |
+|------|-------|----------|
+| <name> | works / broken / partial / unknown | file:line, commit, log, URL |
+
+## 4. Non-obvious decisions
+
+[Decisions visible from code/commits/docs that aren't obvious to an outsider.
+For each: what was decided, why (with evidence), or "rationale unclear".]
+
+## 5. Risks & landmines
+
+[What would bite if you tried to run / deploy / show this today.
+For each: what it is, what happens, what trigger. Diagnosis only.]
+
+## 6. Open questions for the owner
+
+[Direct questions only the owner can answer from memory.]
+
+## 7. Out-of-scope notes (optional)
+
+[One-liners only if a fix idea was unavoidable. Skip otherwise.]
+\`\`\`
+
+Start by reading \`${AUDIT_DIR}/00-shared-header.md\` for the pinned commit SHA, then begin.
+`
 const SYNTHESIZER_PROMPT = ''
 
 // --- orchestration --- (filled in Task 5)
