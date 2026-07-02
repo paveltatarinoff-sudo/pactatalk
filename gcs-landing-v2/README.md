@@ -39,3 +39,13 @@ npm run start
 
 ## Деплой
 Лендинг рассчитан на деплой в Vercel как отдельный проект.
+
+## Campaign Links
+Для validation wave есть генератор UTM-ссылок и короткий runbook:
+
+```bash
+npm run campaign:links -- --config campaigns/validation-wave.sample.json
+```
+
+Документация:
+- `docs/validation-wave-operations.md`

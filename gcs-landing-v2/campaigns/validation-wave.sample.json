@@ -1,0 +1,33 @@
+{
+  "baseUrl": "https://pactatalk.app/",
+  "campaigns": [
+    {
+      "name": "Telegram post A / v1",
+      "source": "telegram",
+      "campaign": "post_a",
+      "messageVariant": "v1",
+      "notes": "Baseline founder/community post."
+    },
+    {
+      "name": "Telegram post A / v2",
+      "source": "telegram",
+      "campaign": "post_a",
+      "messageVariant": "v2",
+      "notes": "Second hook for the same placement."
+    },
+    {
+      "name": "Telegram post B / v1",
+      "source": "telegram",
+      "campaign": "post_b",
+      "messageVariant": "v1",
+      "notes": "Alternative post angle for comparison."
+    },
+    {
+      "name": "Founder DM / v1",
+      "source": "founder_dm",
+      "campaign": "dm_intro",
+      "messageVariant": "v1",
+      "notes": "Useful if direct outreach joins the same validation wave."
+    }
+  ]
+}

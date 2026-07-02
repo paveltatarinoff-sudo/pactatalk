@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "campaign:links": "node scripts/generate-campaign-links.mjs"
   },
   "dependencies": {
     "next": "16.1.6",
