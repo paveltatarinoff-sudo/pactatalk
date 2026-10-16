@@ -25,7 +25,9 @@ export const metadata: Metadata = {
     locale: "ru_RU",
     images: [
       {
-        url: "/opengraph-image",
+        // Static asset committed to the repo; the dynamic /opengraph-image
+        // route 404s on the current production deploy.
+        url: "/landing/og-card.png",
         width: 1200,
         height: 630,
         alt: "PACTA — AI",
@@ -36,7 +38,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "PACTA — AI-бот для сложных разговоров в паре",
     description: "Бот для пар, которым нужно обсудить важное без криков, перебиваний и хождения по кругу.",
-    images: ["/twitter-image"],
+    images: ["/landing/og-card.png"],
   },
 };
 
