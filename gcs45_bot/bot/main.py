@@ -152,7 +152,15 @@ async def main() -> None:
         db_kwargs["connect_args"] = {"ssl": "require"}
     # Убираем параметр ssl= из URL — asyncpg его не понимает в строке подключения
     db_url = settings.database_url.split("?")[0]
-    engine = create_async_engine(db_url, echo=not settings.is_production, **db_kwargs)
+    engine = create_async_engine(
+        db_url,
+        echo=not settings.is_production,
+        # Neon suspends idle compute and drops connections; without pre-ping the
+        # first query after a long idle hits a dead pooled connection.
+        pool_pre_ping=True,
+        pool_recycle=300,
+        **db_kwargs,
+    )
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     await maybe_bootstrap_schema(engine)
